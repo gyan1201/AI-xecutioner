@@ -346,6 +346,278 @@ function truncate(text, limit) {
   return value.length > limit ? `${value.slice(0, Math.max(0, limit - 1))}…` : value;
 }
 
+function lineValue(prompt, label) {
+  const match = String(prompt).match(new RegExp(`^${label}:\\s*(.+)$`, "im"));
+  return match?.[1]?.trim() ?? "";
+}
+
+function orgJson(prompt) {
+  const goal = lineValue(prompt, "Company goal") || lineValue(prompt, "Goal") || "the company goal";
+  const name = lineValue(prompt, "Company name") || "the company";
+  const lower = goal.toLowerCase();
+  const wants = (...terms) => terms.some((term) => lower.includes(term));
+  const roster = [
+    {
+      name: "Avery Chen",
+      role: "ceo",
+      title: "Chief Executive Officer",
+      department: "Executive",
+      reportsToRole: null,
+      capabilities: ["strategy", "prioritisation"],
+      skills: ["planning"],
+      instructions: "Set the cycle focus, resolve conflicts and protect the budget.",
+      budgetShare: 0.12,
+    },
+    {
+      name: "Priya Raman",
+      role: "cto",
+      title: "Chief Technology Officer",
+      department: "Product & Engineering",
+      reportsToRole: "ceo",
+      capabilities: ["architecture", "delivery"],
+      skills: ["review"],
+      instructions: "Own feasibility and delivery quality.",
+      budgetShare: 0.18,
+    },
+    {
+      name: "Lena Okafor",
+      role: "engineer",
+      title: "Senior Engineer",
+      department: "Product & Engineering",
+      reportsToRole: "cto",
+      capabilities: ["implementation", "testing"],
+      skills: ["typescript"],
+      instructions: "Ship working slices with tests and explicit assumptions.",
+      budgetShare: 0.2,
+    },
+    {
+      name: "Iris Novak",
+      role: "researcher",
+      title: "Research Lead",
+      department: "Insights",
+      reportsToRole: "ceo",
+      capabilities: ["research", "synthesis"],
+      skills: ["analysis"],
+      instructions: "Ground claims in retrieved context and label assumptions.",
+      budgetShare: 0.1,
+    },
+  ];
+  if (wants("growth", "market", "revenue", "launch", "customer", "activation", "pipeline")) {
+    roster.push({
+      name: "Noah Bergstrom",
+      role: "cmo",
+      title: "Head of Growth",
+      department: "Go-to-market",
+      reportsToRole: "ceo",
+      capabilities: ["positioning", "campaigns"],
+      skills: ["messaging"],
+      instructions: "Tie every campaign to a measurable outcome.",
+      budgetShare: 0.14,
+    });
+  }
+  if (wants("cost", "margin", "pricing", "finance", "budget")) {
+    roster.push({
+      name: "Hana Sato",
+      role: "cfo",
+      title: "Chief Financial Officer",
+      department: "Finance",
+      reportsToRole: "ceo",
+      capabilities: ["unit economics"],
+      skills: ["modelling"],
+      instructions: "Model base and downside cases with explicit assumptions.",
+      budgetShare: 0.08,
+    });
+  }
+  roster.push({
+    name: "Dev Kapoor",
+    role: "qa",
+    title: "Quality Lead",
+    department: "Product & Engineering",
+    reportsToRole: "cto",
+    capabilities: ["review", "risk"],
+    skills: ["test plans"],
+    instructions: "Send back anything vague or unproven.",
+    budgetShare: 0.08,
+  });
+  const total = roster.reduce((sum, agent) => sum + agent.budgetShare, 0);
+  for (const agent of roster) agent.budgetShare = Number((agent.budgetShare / total).toFixed(4));
+  return {
+    mission: goal,
+    departments: [...new Set(roster.map((agent) => agent.department))].map((department) => ({
+      name: department,
+      mission: `${department} for ${name}`,
+    })),
+    agents: roster,
+    goals: [
+      {
+        title: goal.slice(0, 90),
+        description: goal,
+        level: "company",
+        kpis: [
+          { name: "Primary outcome", target: "Moved this quarter", current: "baseline pending", measure: "Company dashboard" },
+          { name: "Cycle throughput", target: "1 accepted deliverable per cycle", current: "0", measure: "Issue history" },
+          { name: "Cost per outcome", target: "Inside budget", current: "tracking", measure: "Cost ledger" },
+        ],
+      },
+    ],
+    projects: [{ name: `${name} execution`, description: `Delivery project for: ${goal}`, goalIndex: 0 }],
+    issues: [
+      {
+        title: "Write the strategy memo and success metrics",
+        description: `Decision-ready memo for: ${goal}`,
+        priority: "critical",
+        assigneeRole: "researcher",
+        projectIndex: 0,
+        goalIndex: 0,
+        acceptanceCriteria: ["Names the target segment", "Defines 3 KPIs", "Lists top risks"],
+        estimate: "M",
+        needsApproval: false,
+      },
+      {
+        title: "Ship the first working slice",
+        description: "Implement the smallest complete slice a customer could use end to end.",
+        priority: "high",
+        assigneeRole: "engineer",
+        projectIndex: 0,
+        goalIndex: 0,
+        acceptanceCriteria: ["Scope is bounded", "Verification steps documented"],
+        estimate: "L",
+        needsApproval: false,
+      },
+      {
+        title: "Draft the launch announcement",
+        description: "Customer-facing launch copy plus an internal enablement note.",
+        priority: "medium",
+        assigneeRole: wants("growth", "launch", "customer") ? "cmo" : "ceo",
+        projectIndex: 0,
+        goalIndex: 0,
+        acceptanceCriteria: ["One concrete promise", "Internal note explains how to sell it"],
+        estimate: "S",
+        needsApproval: true,
+      },
+    ],
+  };
+}
+
+function readyIssuesFrom(prompt) {
+  const line = String(prompt)
+    .split("\n")
+    .find((entry) => entry.startsWith("READY_ISSUES_JSON:"));
+  if (!line) return [];
+  try {
+    const parsed = JSON.parse(line.slice("READY_ISSUES_JSON:".length).trim());
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function cycleJson(prompt) {
+  const ready = readyIssuesFrom(prompt);
+  const assignments = ready.slice(0, 3).map((issue, index) => ({
+    issueKey: issue.key,
+    agentRole: issue.assigneeRole ?? "general",
+    why: index === 0 ? `Highest-priority ready work (${issue.priority})` : `${issue.priority} priority and ready to execute`,
+  }));
+  const newIssues = ready.length < 2
+    ? [
+        {
+          title: "Instrument the outcome metric",
+          description: "Add tracking so the next cycle can prove movement against the baseline.",
+          priority: "medium",
+          assigneeRole: "researcher",
+          acceptanceCriteria: ["Metric defined", "Data source named", "Owner assigned"],
+          estimate: "S",
+          needsApproval: false,
+        },
+      ]
+    : [];
+  return {
+    focus: assignments.length
+      ? `Ship ${ready[0]?.title ?? "the top priority"} and keep the board unblocked`
+      : "Close out the backlog and report",
+    assignments,
+    newIssues,
+    risks: ready.length ? ["Execution depends on the top-priority issue landing this cycle."] : [],
+  };
+}
+
+function employeeMarkdown(prompt) {
+  const issue = prompt.match(/ISSUE\s+([A-Z0-9-]+):\s*(.+)/);
+  const key = issue?.[1] ?? "TASK";
+  const title = (issue?.[2] ?? "deliverable").trim();
+  const criteria = [...String(prompt).matchAll(/^- (.+)$/gm)].map((match) => match[1]).slice(0, 4);
+  const knowledge = [...String(prompt).matchAll(/\[K(\d+)\]\s*([^:]+):\s*(.{0,140})/g)].slice(0, 3);
+  return [
+    `# ${title}`,
+    "",
+    `**Issue:** ${key} · **Owner:** simulated employee · **Status:** ready for review`,
+    "",
+    "## What this is",
+    `A finished, reviewable deliverable for "${title}". It states the decision, the evidence and the next action so the board can accept it without a follow-up meeting.`,
+    "",
+    "## Decision",
+    "1. Ship the smallest complete slice that reaches first value this cycle.",
+    "2. Instrument one primary metric before scaling any spend.",
+    "3. Escalate anything that needs money or external approval.",
+    "",
+    "## Evidence",
+    ...(knowledge.length
+      ? knowledge.map((entry) => `- [K${entry[1]}] ${entry[2].trim()}: ${entry[3].trim()}…`)
+      : ["- No company documents matched; assumptions are listed below."]),
+    "",
+    "## Acceptance criteria",
+    ...(criteria.length ? criteria.map((item) => `- [x] ${item}`) : ["- [x] Deliverable produced"]),
+    "",
+    "## Assumptions",
+    "- Baseline numbers are estimates until the instrumentation issue lands.",
+    "",
+    "## Next actions",
+    "| Step | Owner | Due |",
+    "| --- | --- | --- |",
+    "| Instrument the primary metric | Research lead | This cycle |",
+    "| Review with the board | CEO | Next cycle |",
+    "",
+    "> Generated in simulation mode. Connect an NVIDIA API key for real inference.",
+  ].join("\n");
+}
+
+function reviewJson(prompt) {
+  const deliverable = String(prompt).split("DELIVERABLE:")[1] ?? "";
+  const thin = deliverable.trim().length < 400 || /placeholder|\bTODO\b|lorem ipsum/i.test(deliverable);
+  return thin
+    ? {
+        verdict: "rework",
+        score: 55,
+        notes: "The deliverable is too thin to accept against the acceptance criteria.",
+        requiredChanges: ["Expand each section with specifics, numbers and owners.", "Remove placeholder text."],
+      }
+    : {
+        verdict: "pass",
+        score: 88,
+        notes: "Every acceptance criterion is addressed with specifics and explicit assumptions.",
+        requiredChanges: [],
+      };
+}
+
+function standupMarkdown(prompt) {
+  const results = [...String(prompt).matchAll(/^- (.+)$/gm)].map((match) => match[1]);
+  return [
+    "**Standup**",
+    "",
+    "**Shipped**",
+    ...(results.filter((line) => line.includes("done")).map((line) => `- ${line}`) || []),
+    "",
+    "**Needs the board**",
+    ...(results.filter((line) => /blocked|approval|rework/.test(line)).map((line) => `- ${line}`) || ["- Nothing blocked."]),
+    "",
+    "**Next cycle**",
+    "- Continue the highest-priority open issue and protect the budget.",
+    "",
+    "> Simulated standup. Connect an NVIDIA API key for real synthesis.",
+  ].join("\n");
+}
+
 function simulatedContent({ messages, model, options }) {
   const intent = readIntent(options);
   const prompt = asText(lastUser(messages));
@@ -358,6 +630,16 @@ function simulatedContent({ messages, model, options }) {
       return JSON.stringify(safetyJson(prompt));
     case "report":
       return reportMarkdown(prompt);
+    case "org":
+      return jsonBlock(orgJson(prompt));
+    case "cycle":
+      return jsonBlock(cycleJson(prompt));
+    case "employee":
+      return employeeMarkdown(prompt);
+    case "review":
+      return jsonBlock(reviewJson(prompt));
+    case "standup":
+      return standupMarkdown(prompt);
     case "operator":
       return operatorMarkdown(prompt);
     case "analyst":

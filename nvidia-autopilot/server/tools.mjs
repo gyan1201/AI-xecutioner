@@ -111,6 +111,13 @@ function safeName(value, fallback) {
  */
 export function createToolRuntime(context) {
   const { nim, store, retrieval, roles, runId, emit, signal } = context;
+  // Runs persist artifacts under data/runs/<id>; company cycles persist under
+  // data/companies/<id>. Callers can inject the sink so agents use the same
+  // tools in both engines.
+  const writeArtifact =
+    typeof context.writeArtifact === "function"
+      ? context.writeArtifact
+      : (name, content, meta) => store.writeArtifact(runId, name, content, meta);
   const approvals = [];
 
   async function run(name, args = {}) {
@@ -155,7 +162,7 @@ export function createToolRuntime(context) {
     async save_artifact(args) {
       if (!runId) return { error: "No active run to save into." };
       const name = safeName(args.filename, "artifact.md");
-      const record = store.writeArtifact(runId, name, args.content ?? "", { source: "agent" });
+      const record = writeArtifact(name, args.content ?? "", { source: "agent" });
       emit("artifact", { name: record.name, bytes: record.bytes });
       return { saved: true, filename: record.name, bytes: record.bytes };
     },
@@ -185,7 +192,7 @@ export function createToolRuntime(context) {
         const extension = artifact.mimeType?.includes("svg") ? "svg" : "jpg";
         const filename = safeName(`${prompt.slice(0, 40)}.${extension}`, "visual.jpg");
         const buffer = Buffer.from(artifact.base64, "base64");
-        const record = store.writeArtifact(runId, filename, buffer, { source: "image", model: roles.artist?.model });
+        const record = writeArtifact(filename, buffer, { source: "image", model: roles.artist?.model });
         emit("artifact", { name: record.name, bytes: record.bytes, kind: "image" });
         return { saved: true, filename: record.name, model: result.model, simulated: result.simulated };
       }

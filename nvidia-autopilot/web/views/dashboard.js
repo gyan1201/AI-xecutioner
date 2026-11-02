@@ -85,6 +85,26 @@ export async function render(el, ctx) {
       ${statCard("Knowledge", `${knowledge.chunks ?? 0}`, `${knowledge.documents ?? 0} documents · ${knowledge.pending ?? 0} pending`)}
     </div>
 
+    <div class="card" style="margin-top:var(--space-4)">
+      <div class="card-head">
+        <span class="card-title">Company OS</span>
+        <a class="small" href="#/companies">Build a company →</a>
+      </div>
+      <p class="small muted">
+        Autopilot delivers one goal. <strong>Company OS</strong> runs the whole organization: departments,
+        <a href="#/companies">agents with budgets and reporting lines</a>, Paperclip-style goals and a board of issues,
+        an executive cycle that plans, executes and reviews, and a Paperclip bridge that mirrors the company into a live
+        Paperclip instance.
+      </p>
+      <div class="row-wrap" style="margin-top:var(--space-3)">
+        <span class="pill">${status?.companies?.total ?? 0} companies</span>
+        <span class="pill">${status?.companies?.agents ?? 0} agents</span>
+        <span class="pill">${status?.companies?.openIssues ?? 0} open issues</span>
+        <span class="pill">${status?.companies?.autoMode ?? 0} running auto mode</span>
+        <a class="btn btn-sm btn-primary" href="#/companies">Open Company OS</a>
+      </div>
+    </div>
+
     <div class="split" style="margin-top:var(--space-4)">
       <div class="card">
         <div class="card-head">

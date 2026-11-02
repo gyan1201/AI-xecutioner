@@ -60,6 +60,7 @@ server.listen(config.port, "0.0.0.0", () => {
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
+    runtime.company?.stopAll();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 3000).unref();
   });

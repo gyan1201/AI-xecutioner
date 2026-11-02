@@ -1,5 +1,10 @@
 # Running Paperclip agents on NVIDIA NIM
 
+> **New:** Company OS implements Paperclip's control-plane vocabulary natively
+> (companies → departments → agents → goals → issues → budgets → approvals) on
+> NVIDIA NIM, and can mirror a company into a live Paperclip server. See
+> [`company-os.md`](company-os.md).
+
 Paperclip (`../paperclip`) routes agent runs through AI connections. NVIDIA NIM
 speaks the OpenAI **Chat Completions** shape, which Paperclip already supports as
 a first-class gateway (`chat-completions-api`), so no provider enum change is

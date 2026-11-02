@@ -39,12 +39,13 @@ function dataDir() {
 export const paths = {
   data: dataDir(),
   runs: join(dataDir(), "runs"),
+  companies: join(dataDir(), "companies"),
   settings: join(dataDir(), "settings.json"),
   knowledge: join(dataDir(), "knowledge"),
 };
 
 export function ensureDataDirs() {
-  for (const dir of [paths.data, paths.runs, paths.knowledge]) {
+  for (const dir of [paths.data, paths.runs, paths.companies, paths.knowledge]) {
     mkdirSync(dir, { recursive: true });
   }
 }
@@ -114,6 +115,15 @@ export function loadConfig() {
   };
 }
 
+export function paperclipSettings() {
+  const runtime = readRuntimeSettings();
+  const paperclip = runtime.paperclip ?? {};
+  return {
+    baseUrl: String(paperclip.baseUrl || process.env.PAPERCLIP_API_BASE || "").replace(/\/+$/, ""),
+    token: String(paperclip.token || process.env.PAPERCLIP_API_KEY || ""),
+  };
+}
+
 export function publicConfig(config = loadConfig()) {
   return {
     nimBaseUrl: config.nimBaseUrl,
@@ -123,5 +133,13 @@ export function publicConfig(config = loadConfig()) {
     keyHint: config.apiKey ? `••••${config.apiKey.slice(-4)}` : null,
     pricing: config.pricing,
     maxConcurrency: config.maxConcurrency,
+    paperclip: (() => {
+      const current = paperclipSettings();
+      return {
+        configured: Boolean(current.baseUrl && current.token),
+        baseUrl: current.baseUrl || null,
+        tokenHint: current.token ? `••••${current.token.slice(-4)}` : null,
+      };
+    })(),
   };
 }

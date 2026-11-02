@@ -99,7 +99,7 @@ function serveStatic(req, res, pathname) {
 }
 
 export function createApp(runtime, { broadcast = () => {} } = {}) {
-  const { nim, store, retrieval, autopilot, metrics, loadModels, config } = runtime;
+  const { nim, store, retrieval, autopilot, company, paperclip, metrics, loadModels, config } = runtime;
 
   const routes = [];
   const route = (method, pattern, handler) => {
@@ -133,6 +133,17 @@ export function createApp(runtime, { broadcast = () => {} } = {}) {
         total: runs.length,
         active: runs.filter((run) => ["queued", "planning", "executing", "awaiting_approval", "paused", "reporting"].includes(run.status)).length,
       },
+      companies: (() => {
+        const list = company.list();
+        return {
+          total: list.length,
+          active: list.filter((entry) => entry.status === "active").length,
+          agents: list.reduce((sum, entry) => sum + entry.counts.agents, 0),
+          openIssues: list.reduce((sum, entry) => sum + entry.counts.open, 0),
+          autoMode: list.filter((entry) => entry.autoMode?.enabled).length,
+          spentCents: list.reduce((sum, entry) => sum + entry.counts.spentCents, 0),
+        };
+      })(),
       node: process.version,
     };
   });
@@ -155,6 +166,14 @@ export function createApp(runtime, { broadcast = () => {} } = {}) {
       };
     }
     if (body.roleOverrides && typeof body.roleOverrides === "object") patch.roleOverrides = body.roleOverrides;
+    if (body.paperclip && typeof body.paperclip === "object") {
+      const current = config.read().paperclip ?? {};
+      const next = { ...current };
+      if (typeof body.paperclip.baseUrl === "string") next.baseUrl = body.paperclip.baseUrl.trim();
+      if (typeof body.paperclip.token === "string") next.token = body.paperclip.token.trim();
+      if (body.paperclip.runId !== undefined) next.runId = String(body.paperclip.runId ?? "").trim();
+      patch.paperclip = next;
+    }
     config.write(patch);
     return { ...config.public(), roleOverrides: config.read().roleOverrides ?? {} };
   });
@@ -468,6 +487,171 @@ export function createApp(runtime, { broadcast = () => {} } = {}) {
     return undefined;
   });
 
+  /* --------------------------------- company -------------------------------- */
+
+  route("GET", "/api/companies", async () => ({ companies: company.list() }));
+
+  route("POST", "/api/companies", async ({ body }) => {
+    const created = await company.createCompany({
+      name: body.name,
+      goal: body.goal,
+      constraints: body.constraints,
+      size: Number(body.size) || undefined,
+      budgetMonthlyCents: Number(body.budgetMonthlyCents) || 0,
+      settings: body.settings ?? {},
+    });
+    return { company: created, summary: runtime.company.get(created.id).summary };
+  });
+
+  route("GET", "/api/companies/:id", async ({ params }) => company.get(params.id));
+
+  route("PATCH", "/api/companies/:id", async ({ params, body }) => ({
+    company: company.updateCompany(params.id, body),
+  }));
+
+  route("DELETE", "/api/companies/:id", async ({ params }) => ({ deleted: company.deleteCompany(params.id) }));
+
+  route("POST", "/api/companies/:id/agents", async ({ params, body }) => ({
+    company: company.hire(params.id, body),
+  }));
+
+  route("PATCH", "/api/companies/:id/agents/:agentId", async ({ params, body }) => ({
+    company: company.updateAgent(params.id, params.agentId, body),
+  }));
+
+  route("DELETE", "/api/companies/:id/agents/:agentId", async ({ params }) => ({
+    company: company.fire(params.id, params.agentId),
+  }));
+
+  route("POST", "/api/companies/:id/issues", async ({ params, body }) => company.createIssue(params.id, body));
+
+  route("PATCH", "/api/companies/:id/issues/:issueId", async ({ params, body }) =>
+    company.updateIssue(params.id, params.issueId, body),
+  );
+
+  route("POST", "/api/companies/:id/issues/:issueId/comments", async ({ params, body }) => {
+    const text = String(body.body ?? "").trim();
+    if (!text) throw Object.assign(new Error("body is required"), { status: 422 });
+    return company.commentOnIssue(params.id, params.issueId, text, "board");
+  });
+
+  route("POST", "/api/companies/:id/cycles", async ({ params, body }) => {
+    if (body?.async) {
+      const pending = company.runCycle(params.id, { trigger: "manual" }).catch(() => {});
+      void pending;
+      return { started: true, company: company.get(params.id).company };
+    }
+    const result = await company.runCycle(params.id, { trigger: "manual" });
+    return { cycle: result.cycle, company: result.company, summary: runtime.company.get(params.id).summary };
+  });
+
+  route("POST", "/api/companies/:id/auto", async ({ params, body }) => {
+    if (body.enabled === false) {
+      company.stopAutoMode(params.id, body.reason ?? "Turned off by the operator");
+      return { company: company.get(params.id).company };
+    }
+    const updated = company.startAutoMode(params.id, {
+      everyMinutes: body.everyMinutes,
+      maxCycles: body.maxCycles,
+    });
+    return { company: updated };
+  });
+
+  route("POST", "/api/companies/:id/approvals/:approvalId", async ({ params, body }) => {
+    if (typeof body.approved !== "boolean") {
+      throw Object.assign(new Error("approved must be true or false"), { status: 422 });
+    }
+    return company.decideApproval(params.id, params.approvalId, { approved: body.approved, note: body.note });
+  });
+
+  route("GET", "/api/companies/:id/events", async ({ params, query }) => {
+    const detail = company.get(params.id);
+    const since = query.get("since");
+    if (!since) return { events: detail.events, company: detail.company };
+    const threshold = new Date(since).getTime();
+    return { events: detail.events.filter((event) => new Date(event.at).getTime() > threshold), company: detail.company };
+  });
+
+  route("GET", "/api/companies/:id/stream", async ({ params, req, res }) => {
+    const detail = company.get(params.id);
+    const sse = openSse(res);
+    sse.send("state", detail.company);
+    for (const event of detail.events.slice(-80)) sse.send("event", event);
+    const unsubscribe = company.companies.subscribe(params.id, (message) => {
+      if (message.type === "event") sse.send("event", message.event);
+      else sse.send("state", message.company);
+    });
+    req.on("close", unsubscribe);
+    res.on("close", unsubscribe);
+    return undefined;
+  });
+
+  route("GET", "/api/companies/:id/export", async ({ params, res }) => {
+    const detail = company.get(params.id);
+    const bundle = {
+      schemaVersion: 1,
+      source: "nvidia-autopilot",
+      exportedAt: new Date().toISOString(),
+      company: detail.company,
+      artifacts: detail.artifacts,
+      summary: detail.summary,
+    };
+    const payload = Buffer.from(`${JSON.stringify(bundle, null, 2)}\n`, "utf8");
+    res.writeHead(200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Length": payload.length,
+      "Content-Disposition": `attachment; filename="${detail.company.name.replace(/[^\w.-]+/g, "-")}-bundle.json"`,
+    });
+    res.end(payload);
+    return undefined;
+  });
+
+  route("GET", "/api/companies/:id/artifacts/:name", async ({ params, res }) => {
+    const content = company.artifacts.read(params.id, params.name);
+    if (!content) throw Object.assign(new Error("Artifact not found"), { status: 404 });
+    const type = MIME[extname(params.name).toLowerCase()] ?? "text/plain; charset=utf-8";
+    res.writeHead(200, {
+      "Content-Type": type,
+      "Content-Length": content.length,
+      "Content-Disposition": `inline; filename="${params.name.replace(/"/g, "")}"`,
+    });
+    res.end(content);
+    return undefined;
+  });
+
+  /* -------------------------------- paperclip ------------------------------- */
+
+  route("POST", "/api/paperclip/probe", async ({ body }) => paperclip.probe({ baseUrl: body.baseUrl, token: body.token }));
+
+  route("POST", "/api/paperclip/mirror", async ({ body }) => {
+    const detail = company.get(body.companyId);
+    const result = await paperclip.mirror(detail.company, {
+      dryRun: body.dryRun !== false,
+      existingCompanyId: body.existingCompanyId ?? null,
+      baseUrl: body.baseUrl,
+      token: body.token,
+    });
+    if (!result.dryRun) {
+      const updated = company.companies.get(body.companyId);
+      updated.paperclip = {
+        baseUrl: body.baseUrl ?? paperclip.settings().baseUrl,
+        companyId: result.created.companyId,
+        mirroredAt: new Date().toISOString(),
+        agents: result.created.agents.length,
+        goals: result.created.goals.length,
+        issues: result.created.issues.length,
+      };
+      company.companies.save(updated);
+      company.companies.log(updated, {
+        type: "paperclip.mirrored",
+        actor: "board",
+        message: `Mirrored to Paperclip company ${result.created.companyId}`,
+      });
+      return { ...result, company: updated };
+    }
+    return result;
+  });
+
   /* --------------------------------- served --------------------------------- */
 
   route("GET", "/api/stream", async ({ req, res }) => {
@@ -500,7 +684,10 @@ export function createApp(runtime, { broadcast = () => {} } = {}) {
         const result = await entry.handler({ req, res, params, query: url.searchParams, body });
         if (result !== undefined && !res.writableEnded) sendJson(res, 200, result);
       } catch (error) {
-        const status = error?.status ?? (error?.name === "AbortError" ? 499 : 500);
+        // Never hand Node an invalid status code: a thrown error without a
+        // status (or with a bogus one) must still produce a response.
+        const raw = Number(error?.status ?? (error?.name === "AbortError" ? 499 : 500));
+        const status = Number.isInteger(raw) && raw >= 200 && raw <= 599 ? raw : 500;
         if (!res.writableEnded) {
           sendJson(res, status, {
             error: error?.message ?? "Unexpected error",

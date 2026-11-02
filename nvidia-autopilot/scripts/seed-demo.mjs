@@ -4,7 +4,9 @@
  *   node scripts/seed-demo.mjs            # against http://localhost:8787
  *   BASE=http://host:port node scripts/seed-demo.mjs
  *
- * Safe to re-run: it adds documents and a fresh run each time.
+ * Safe to re-run: documents already present are skipped; it adds a fresh
+ * autopilot run and, if no company is active yet, a staffed Company OS company
+ * plus one working cycle.
  */
 
 const BASE = process.env.BASE ?? `http://localhost:${process.env.PORT ?? 8787}`;
@@ -67,6 +69,29 @@ async function main() {
   const indexed = await call("/api/knowledge/index", { method: "POST" });
   console.log(`  · indexed ${indexed.chunks} chunks`);
 
+  // Company OS: build the same company from the same goal and run one cycle.
+  const existing = await call("/api/companies");
+  if (!(existing.companies ?? []).some((entry) => entry.name === "Northwind Labs")) {
+    const { company } = await call("/api/companies", {
+      method: "POST",
+      body: {
+        name: "Northwind Labs",
+        goal: GOAL,
+        constraints: CONTEXT,
+        size: 6,
+        budgetMonthlyCents: 5000,
+        settings: { approvalPolicy: "high", maxIssuesPerCycle: 3, reworkLimit: 1 },
+      },
+    });
+    console.log(`  + company: ${company.name} — ${company.agents.length} agents, ${company.issues.length} issues`);
+    const { cycle } = await call(`/api/companies/${company.id}/cycles`, { method: "POST", body: {} });
+    console.log(
+      `  · cycle ${cycle.index}: ${cycle.stats.issuesDone} done, ${cycle.stats.issuesOpen} open, ${cycle.results.length} worked`,
+    );
+  } else {
+    console.log("  · company already present, skipping");
+  }
+
   const { run } = await call("/api/autopilot", {
     method: "POST",
     body: {
@@ -90,7 +115,7 @@ async function main() {
       console.log(
         `  ✓ ${status} · ${detail.run.tasks.filter((task) => task.status === "done").length}/${detail.run.tasks.length} work items · ${detail.run.usage.totalTokens} tokens · ${detail.artifacts.length} artifacts`,
       );
-      console.log(`\nOpen ${BASE}/#/autopilot/${run.id}`);
+      console.log(`\nOpen ${BASE}/#/companies and ${BASE}/#/autopilot/${run.id}`);
       return;
     }
   }

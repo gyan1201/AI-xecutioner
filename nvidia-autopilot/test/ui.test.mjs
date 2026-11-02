@@ -22,6 +22,7 @@ const { api } = await import("../web/lib.js");
 const views = {
   dashboard: await import("../web/views/dashboard.js"),
   autopilot: await import("../web/views/autopilot.js"),
+  companies: await import("../web/views/companies.js"),
   chat: await import("../web/views/chat.js"),
   knowledge: await import("../web/views/knowledge.js"),
   models: await import("../web/views/models.js"),
@@ -79,6 +80,7 @@ test("every view renders against the live API without throwing", { skip: !JSDOM 
   const EXPECTED = {
     dashboard: /Give one company goal/,
     autopilot: /Autopilot runs|Work items/,
+    companies: /Describe the company/,
     chat: /Chat lab/,
     knowledge: /Knowledge & RAG/,
     models: /Models & routing/,
@@ -95,6 +97,29 @@ test("every view renders against the live API without throwing", { skip: !JSDOM 
     assert.match(host.textContent, EXPECTED[name], `${name} view is missing its expected content`);
     if (typeof cleanup === "function") cleanup();
   }
+
+  // Company OS: build one from a goal, then render its detail view.
+  const company = await runtime.company.createCompany({
+    name: "UI Co",
+    goal: "Launch a paid beta for the analytics product within one quarter.",
+    budgetMonthlyCents: 4000,
+  });
+  await runtime.company.runCycle(company.id);
+
+  host.innerHTML = "";
+  const companyCleanup = await views.companies.render(host, ctx, [company.id]);
+  const companyText = host.textContent;
+  assert.match(companyText, /UI Co/);
+  assert.match(companyText, /Board/);
+  assert.match(companyText, /Paperclip bridge|Autopilot|Organization/);
+  assert.ok(host.querySelectorAll(".task").length >= 1, "the board should list issues");
+  assert.ok(host.querySelectorAll("[data-tab]").length >= 4, "company tabs should render");
+  // Visit every tab so no branch of the detail view stays unrendered.
+  for (const button of [...host.querySelectorAll("[data-tab]")]) {
+    button.dispatchEvent(new dom.window.Event("click"));
+    assert.ok(host.textContent.trim().length > 200, `${button.dataset.tab} tab rendered almost nothing`);
+  }
+  if (typeof companyCleanup === "function") companyCleanup();
 
   // Detail view for a finished run, including the SSE wiring.
   host.innerHTML = "";

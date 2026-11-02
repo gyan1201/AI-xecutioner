@@ -1,6 +1,7 @@
 import { api, reportError, esc } from "./lib.js";
 import * as dashboard from "./views/dashboard.js";
 import * as autopilot from "./views/autopilot.js";
+import * as companies from "./views/companies.js";
 import * as chat from "./views/chat.js";
 import * as knowledge from "./views/knowledge.js";
 import * as models from "./views/models.js";
@@ -11,6 +12,7 @@ import * as settings from "./views/settings.js";
 const ROUTES = [
   { key: "dashboard", path: "/", title: "Mission control", glyph: "◉", view: dashboard },
   { key: "autopilot", path: "/autopilot", title: "Autopilot", glyph: "▶", view: autopilot },
+  { key: "companies", path: "/companies", title: "Company OS", glyph: "⌂", view: companies },
   { key: "chat", path: "/chat", title: "Chat lab", glyph: "◍", view: chat },
   { key: "knowledge", path: "/knowledge", title: "Knowledge & RAG", glyph: "▤", view: knowledge },
   { key: "models", path: "/models", title: "Models & routing", glyph: "◈", view: models },
@@ -33,11 +35,12 @@ const navEl = document.getElementById("nav");
 const crumbEl = document.getElementById("crumb");
 
 function currentRoute() {
-  const hash = location.hash.replace(/^#/, "") || "/";
-  const [pathPart, ...rest] = hash.split("/").filter(Boolean);
+  const raw = location.hash.replace(/^#/, "") || "/";
+  const [pathname, search = ""] = raw.split("?");
+  const [pathPart, ...rest] = pathname.split("/").filter(Boolean);
   const key = pathPart || "dashboard";
   const route = ROUTES.find((entry) => entry.key === key) ?? ROUTES[0];
-  return { route, params: rest, hash };
+  return { route, params: rest, hash: raw, search };
 }
 
 function renderNav() {
@@ -104,6 +107,7 @@ function buildContext() {
     navigate,
     refresh: refreshStatus,
     params: currentRoute().params,
+    search: currentRoute().search,
     setTitle(title) {
       crumbEl.textContent = title;
       document.title = `${title} · NVIDIA Autopilot`;

@@ -2,6 +2,8 @@ import { createNim } from "./nim.mjs";
 import { createStore } from "./store.mjs";
 import { createRetrieval } from "./retrieval.mjs";
 import { createAutopilot } from "./autopilot.mjs";
+import { createCompanyService } from "./company/service.mjs";
+import { createPaperclipClient } from "./paperclip.mjs";
 import { loadConfig, writeRuntimeSettings, readRuntimeSettings, publicConfig } from "./config.mjs";
 import { MODEL_PRESETS, ROLE_DEFINITIONS, describeModel, resolveRoles } from "./catalog.mjs";
 
@@ -87,11 +89,37 @@ export function createRuntime({ onEvent } = {}) {
     getConfig: loadConfig,
   });
 
+  // Company agents resolve role -> model at call time, so operator overrides in
+  // Models & routing apply to running companies without a restart.
+  const liveRoles = new Proxy(
+    {},
+    {
+      get: (_target, property) => activeRoles()[property],
+      has: (_target, property) => Boolean(activeRoles()[property]),
+      ownKeys: () => Object.keys(activeRoles()),
+      getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }),
+    },
+  );
+
+  const company = createCompanyService({
+    nim,
+    store,
+    retrieval,
+    roles: liveRoles,
+    getConfig: loadConfig,
+    onEvent,
+  });
+  company.resumeAutoModes();
+
+  const paperclip = createPaperclipClient({ config: { load: loadConfig, read: readRuntimeSettings } });
+
   return {
     nim,
     store,
     retrieval,
     autopilot,
+    company,
+    paperclip,
     metrics,
     loadModels,
     activeRoles,

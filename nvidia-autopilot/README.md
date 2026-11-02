@@ -1,9 +1,12 @@
 # NVIDIA Autopilot
 
-**One company goal in. Planned, reviewed, shipped work out.** Every NVIDIA NIM
+**One company goal in. A staffed company that runs itself, out.** Every NVIDIA NIM
 capability — chat, reasoning, tool calling, vision, embeddings, reranking,
-guardrails, image generation — wired into a single control room, plus an
-autopilot that runs the whole loop unattended on [build.nvidia.com](https://build.nvidia.com).
+guardrails, image generation — wired into one control room, with two engines on
+top: an **autopilot** that delivers a single goal, and a **Company OS** that
+builds the organization (departments, hires, goals, budgets, approvals, board) on
+[Paperclip](https://github.com/paperclipai/paperclip)'s operating model and can
+mirror it into a live Paperclip instance.
 
 ```bash
 cd nvidia-autopilot
@@ -14,6 +17,35 @@ No build step, no runtime dependencies, Node ≥ 20. With no API key the app run
 in **deterministic simulation mode** so every screen and the full auto mode are
 explorable offline. Add a key from [build.nvidia.com](https://build.nvidia.com)
 in **Settings** to switch to live inference.
+
+---
+
+## Company OS — the company, not just the goal
+
+`#/companies` turns one sentence into an operating company:
+
+```bash
+curl -s localhost:8787/api/companies -H 'content-type: application/json' -d '{
+  "name": "Northwind Labs",
+  "goal": "Reach $20k MRR in 90 days with self-serve onboarding, no new headcount.",
+  "budgetMonthlyCents": 5000,
+  "settings": { "approvalPolicy": "high" }
+}'
+```
+
+| Layer | What you get |
+| --- | --- |
+| **Org design** | A NIM strategist designs departments, a roster with titles, managers, capabilities and budget shares, company goals with KPIs, a project and a backlog. Malformed model output falls back to a deterministic blueprint. |
+| **People** | Hire, retitle, rebudget, pause, change model or let anyone go. Every agent has a model, an owner and a monthly cap. |
+| **Board** | Issues with keys (`NW-3`), priorities, acceptance criteria, `blockedBy` dependencies, comments, deliverables and review verdicts — Paperclip's enums exactly. |
+| **Money** | One ledger row per model call with exact tokens; sub-cent precision; `over_budget` agents are skipped; nobody spends past their cap (not even the CEO's planning call). |
+| **Approvals** | Risky/public issues park as `blocked` with a board approval; agents can also escalate from inside a tool call. Approving releases the issue to the next cycle. |
+| **Cycles** | CEO sets the focus and assignments → employees work with tools and citations → quality lead accepts or sends back (rework limit) → scribe writes an end-of-cycle standup. |
+| **Auto mode** | A cycle every N minutes until the budget, the backlog, the approval queue or `maxCycles` stops it — with the reason recorded. Survives a restart. |
+| **Paperclip bridge** | Preview then push the company into a real Paperclip server (company → agents → goals → issues) over its REST API; typed, actionable errors when it cannot. |
+| **Audit** | `data/companies/<id>/events.ndjson` plus a live SSE stream, artifact downloads and a portable export bundle. |
+
+Full detail: [`docs/company-os.md`](docs/company-os.md).
 
 ---
 
@@ -76,7 +108,7 @@ code path is identical.
 # 1. run it (simulation mode: no key needed)
 cd nvidia-autopilot && npm start
 
-# 2. optional: seed a demo company + a finished run
+# 2. optional: seed a demo company (runs on NIM) + a finished autopilot run
 node scripts/seed-demo.mjs
 
 # 3. live inference
@@ -101,6 +133,8 @@ Open <http://localhost:8787>. Create a key at
 | `NVIDIA_TIMEOUT_MS` | `180000` | Per-request timeout |
 | `NVIDIA_MAX_CONCURRENCY` | `4` | Upper bound for run concurrency |
 | `NVIDIA_PRICE_INPUT_PER_MTOK` / `..._OUTPUT_...` | — | Optional cost estimate |
+| `PAPERCLIP_API_BASE` | — | Paperclip API root, e.g. `http://localhost:3100/api` |
+| `PAPERCLIP_API_KEY` | — | Paperclip board bearer token |
 
 Settings saved in the UI (`data/settings.json`, mode 0600) take precedence over
 the environment. The API key is never returned to the browser — only a masked
@@ -113,6 +147,7 @@ hint.
 | Screen | What it is for |
 | --- | --- |
 | **Mission control** | Give a goal, set policy, see what the company is doing right now. |
+| **Company OS** | Build a company from a goal, then run its org chart, board, finances, approvals and auto mode — and mirror it into Paperclip. |
 | **Autopilot** | Live run timeline, plan, work items, reviews, artifacts, executive report, approvals. |
 | **Chat lab** | Streaming playground: model picker, temperature, JSON mode, agent tools, vision attachments. |
 | **Knowledge & RAG** | Add company documents, index them, test embed → rerank retrieval with scores. |
@@ -151,6 +186,20 @@ GET    /api/autopilot/:id          run + artifacts + events
 GET    /api/autopilot/:id/stream   SSE run events
 POST   /api/autopilot/:id/{pause,resume,cancel,approve}
 GET    /api/autopilot/:id/artifacts/:name
+
+GET    /api/companies              list companies with counts + auto-mode state
+POST   /api/companies              build a company from { name, goal, ... }
+GET    /api/companies/:id          company + summary + artifacts + events
+PATCH  /api/companies/:id          name, mission, budget, status, settings
+DELETE /api/companies/:id
+POST   /api/companies/:id/agents   hire        PATCH/DELETE .../agents/:agentId
+POST   /api/companies/:id/issues   add         PATCH .../issues/:issueId
+POST   /api/companies/:id/issues/:issueId/comments
+POST   /api/companies/:id/cycles   run one cycle (async: true supported)
+POST   /api/companies/:id/auto     { enabled, everyMinutes, maxCycles }
+POST   /api/companies/:id/approvals/:approvalId   { approved, note }
+GET    /api/companies/:id/{events,stream,export,artifacts/:name}
+POST   /api/paperclip/{probe,mirror}
 ```
 
 Start a run:
@@ -179,15 +228,18 @@ nvidia-autopilot/
 │  ├─ tools.mjs        agent tool runtime (incl. a safe expression parser)
 │  ├─ retrieval.mjs    chunk → embed → cosine → rerank RAG
 │  ├─ catalog.mjs      model presets, capability inference, role routing, tools
+│  ├─ company/         Company OS: store.mjs (state, ledger, approvals),
+│  │                   org.mjs (goal → org design), service.mjs (cycles, auto mode)
+│  ├─ paperclip.mjs    Paperclip REST bridge (preview, mirror, typed errors)
 │  ├─ store.mjs        file-backed runs, events, artifacts, knowledge
 │  ├─ config.mjs       settings precedence + 0600 secret storage
 │  └─ sim.mjs          deterministic offline NIM simulator
 ├─ web/                dependency-free SPA (ES modules, hash routing)
 │  ├─ app.js  lib.js  styles.css  index.html
 │  └─ views/           dashboard, autopilot, chat, knowledge, models,
-│                      guardrails, studio, settings
+│                      guardrails, studio, companies, settings
 ├─ scripts/seed-demo.mjs
-└─ test/               24 tests: engine, tools, retrieval, HTTP, UI render
+└─ test/               35 tests: engine, tools, retrieval, company, bridge, HTTP, UI
 ```
 
 Design choices worth knowing:
@@ -206,15 +258,17 @@ Design choices worth knowing:
 ## Tests
 
 ```bash
-npm test                                      # 24 tests, no network, no key
+npm test                                      # 35 tests, no network, no key
 npm i --no-save jsdom && npm test             # + UI render smoke test
 ```
 
 Covers: role resolution and capability inference, the calculator parser,
 chunking/similarity, JSON recovery, a full goal run end-to-end (plan, tools,
 reviews, guardrails, report, artifacts, event ordering), pause/resume/cancel,
-approval gating, budget hard-stops, every HTTP route, and that each view renders
-against the live API.
+approval gating, budget hard-stops, company creation and cycles, auto mode limits,
+per-agent budgets, the Paperclip bridge (dry run, mirror, error hints), every HTTP
+route, and that each view — including every Company OS tab — renders against the
+live API.
 
 ---
 
@@ -235,14 +289,19 @@ against the live API.
 
 ---
 
-## Using NVIDIA models inside Paperclip
+## Paperclip, both directions
 
-This repository also contains [Paperclip](../paperclip), the agent-company
-control plane. NVIDIA NIM is OpenAI-compatible, so Paperclip agents can run on
-NVIDIA models without patching its provider enum — connect NIM as a
-**Chat Completions API** gateway. See
-[`docs/paperclip-integration.md`](docs/paperclip-integration.md) for the exact
-steps (endpoint, env key, model ids) and for using this app as the retrieval /
-autopilot sidecar next to a Paperclip board.
+This repository also contains [Paperclip](../paperclip), the agent-company control
+plane. The two integrate in both directions:
+
+- **Here → Paperclip.** Company OS mirrors a company into a live Paperclip server
+  (company, agents with budgets, goals, issues) over its REST API — preview the
+  calls first, then push. See [`docs/company-os.md`](docs/company-os.md#4-the-paperclip-bridge).
+- **NVIDIA models → Paperclip agents.** NIM is OpenAI-compatible, so Paperclip
+  agents can run on NVIDIA models without patching its provider enum — connect NIM
+  as a **Chat Completions API** gateway. See
+  [`docs/paperclip-integration.md`](docs/paperclip-integration.md) for the exact
+  endpoint, env key and model ids, plus using this app as the retrieval/autopilot
+  sidecar next to a Paperclip board.
 
 Licence: MIT (inherited from this repository).

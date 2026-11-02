@@ -173,3 +173,98 @@ test("serves the single-page UI", async () => {
   const html = await response.text();
   assert.match(html, /NVIDIA/);
 });
+
+test("company API builds, runs and audits a company over HTTP", async () => {
+  const created = await json("/api/companies", {
+    method: "POST",
+    body: {
+      name: "HTTP Co",
+      goal: "Launch a paid beta for the analytics product within one quarter.",
+      budgetMonthlyCents: 4000,
+      settings: { approvalPolicy: "high" },
+    },
+  });
+  assert.equal(created.status, 200);
+  const company = created.body.company;
+  assert.ok(company.id);
+  assert.ok(company.agents.length >= 4);
+  assert.ok(company.issues.length >= 3);
+
+  const listed = await json("/api/companies");
+  assert.ok(listed.body.companies.some((entry) => entry.id === company.id));
+
+  const cycle = await json(`/api/companies/${company.id}/cycles`, { method: "POST", body: {} });
+  assert.equal(cycle.status, 200);
+  assert.equal(cycle.body.cycle.status, "completed");
+  assert.ok(cycle.body.summary);
+
+  const detail = await json(`/api/companies/${company.id}`);
+  assert.ok(detail.body.events.length > 0);
+  assert.ok(detail.body.artifacts.length > 0);
+  const artifact = await fetch(`${base}/api/companies/${company.id}/artifacts/${encodeURIComponent(detail.body.artifacts[0].name)}`);
+  assert.equal(artifact.status, 200);
+  assert.match(artifact.headers.get("content-type") ?? "", /markdown/);
+
+  // Board controls: comment, edit, and status change on a real issue.
+  const issue = detail.body.company.issues[0];
+  const commented = await json(`/api/companies/${company.id}/issues/${issue.id}/comments`, {
+    method: "POST",
+    body: { body: "Board note: keep the scope tight." },
+  });
+  assert.equal(commented.status, 200);
+  assert.equal(commented.body.company.issues[0].comments.at(-1).body, "Board note: keep the scope tight.");
+
+  const patched = await json(`/api/companies/${company.id}/issues/${issue.id}`, {
+    method: "PATCH",
+    body: { priority: "low", status: "todo" },
+  });
+  assert.equal(patched.status, 200);
+  assert.equal(patched.body.issue.priority, "low");
+
+  // Auto mode can be turned on and off through the API.
+  const auto = await json(`/api/companies/${company.id}/auto`, {
+    method: "POST",
+    body: { enabled: true, everyMinutes: 60, maxCycles: 1 },
+  });
+  assert.equal(auto.status, 200);
+  assert.equal(auto.body.company.autoMode.enabled, true);
+  const stopped = await json(`/api/companies/${company.id}/auto`, { method: "POST", body: { enabled: false } });
+  assert.equal(stopped.body.company.autoMode.enabled, false);
+
+  const exported = await fetch(`${base}/api/companies/${company.id}/export`);
+  assert.equal(exported.status, 200);
+  const bundle = await exported.json();
+  assert.equal(bundle.schemaVersion, 1);
+  assert.equal(bundle.company.id, company.id);
+});
+
+test("company API rejects bad input instead of creating empty shells", async () => {
+  const noGoal = await json("/api/companies", { method: "POST", body: { name: "Nothing" } });
+  assert.equal(noGoal.status, 422);
+  assert.match(noGoal.body.error, /goal/i);
+
+  const missing = await json("/api/companies/nope/cycles", { method: "POST", body: {} });
+  assert.equal(missing.status, 404);
+
+  const badApproval = await json("/api/companies/nope/approvals/nope", { method: "POST", body: {} });
+  assert.equal(badApproval.status, 422);
+});
+
+test("paperclip endpoints preview the mirror and explain a missing bridge", async () => {
+  const created = await json("/api/companies", {
+    method: "POST",
+    body: { name: "Bridge Test", goal: "Validate the Paperclip bridge end to end.", budgetMonthlyCents: 2000 },
+  });
+  const companyId = created.body.company.id;
+
+  const preview = await json("/api/paperclip/mirror", { method: "POST", body: { companyId, dryRun: true } });
+  assert.equal(preview.status, 200);
+  assert.equal(preview.body.dryRun, true);
+  assert.ok(preview.body.calls > created.body.company.agents.length);
+  assert.equal(preview.body.plan[0].path, "/companies");
+
+  const probe = await json("/api/paperclip/probe", { method: "POST", body: {} });
+  assert.equal(probe.status, 502);
+  assert.match(probe.body.error, /Paperclip/);
+  assert.match(probe.body.hint, /base URL/i);
+});
