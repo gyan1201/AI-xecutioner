@@ -131,6 +131,10 @@ Each blueprint ships a team (names, titles, roles, models, budgets), a goal with
 
 The five healthcare and biology blueprints — ambient clinical scribe, medical imaging, genomics, drug discovery, protein structure — are written out in full: real clinician names and titles, a domain goal with a unit and a baseline (12 → 4 minutes per encounter), and a five-issue backlog that names the actual work (ASR transcripts, SOAP notes with transcript citations, PHI redaction, DICOM preflight, interval-change flags, pLDDT thresholds). Deploying `ambient-clinical` onto a company whose mission is the documentation goal produces Dr. Amara Osei and two engineers, not a Blueprint Lead placeholder. Goals also carry a direction, so a metric that improves downward is scored correctly instead of showing 300%.
 
+| Healthcare AI — the documentation metric | The two clinical pods |
+| --- | --- |
+| ![Healthcare dashboard](docs/screenshot-healthcare-dashboard.jpg) | ![Clinical org chart](docs/screenshot-healthcare-team.jpg) |
+
 ---
 
 ## The product
