@@ -55,6 +55,7 @@ export async function render(root, ctx) {
         ["runs", `Runs (${runs.length})`],
         ["chat", "Chat"],
         ["skills", `Skills (${skills.length})`],
+        ["memory", `Memory (${(agent.memory ?? []).length})`],
         ["instructions", "Instructions"],
       ]
         .map(([key, label]) => `<button class="tab ${tab === key ? "on" : ""}" data-tab="${key}">${esc(label)}</button>`)
@@ -193,6 +194,35 @@ export async function render(root, ctx) {
                 <p class="hint">All ${num(ctx.state.bootstrap?.skills?.count ?? 0)} NVIDIA skills are available. Search by capability, library or domain.</p>
                 <a class="btn sm block" href="#/skills">Open skills catalog →</a>
               </div>
+            </div>
+          </div>`
+        : ""
+    }
+
+    ${
+      tab === "memory"
+        ? `<div class="card">
+            <div class="row-between" style="margin-bottom:10px">
+              <div class="card-title" style="margin:0">What this agent learned</div>
+              <span class="pill">${(agent.memory ?? []).length}/12</span>
+            </div>
+            <p class="hint" style="margin-top:0">Written by the engine the moment a reviewer accepts an issue — never by the model — and replayed in this agent's system prompt on the next run. Each entry is also a knowledge document, so the whole company can cite it.</p>
+            <div class="stack">
+              ${
+                (agent.memory ?? []).length
+                  ? agent.memory
+                      .map(
+                        (entry) => `<div style="border:1px solid var(--border);border-radius:8px;padding:10px 11px">
+                          <div class="row-between" style="gap:10px;align-items:flex-start">
+                            <div class="grow"><span class="pill mono">${esc(entry.issueKey ?? "—")}</span> <span style="font-size:12.6px;font-weight:500">${esc(entry.title ?? "")}</span></div>
+                            <span class="hint">${esc(ago(entry.at))}</span>
+                          </div>
+                          <div class="hint" style="margin-top:6px">${esc(entry.lesson ?? "")}</div>
+                        </div>`,
+                      )
+                      .join("")
+                  : `<div class="hint">Nothing yet. Memory is earned: this fills up when the reviewer accepts this agent's work.</div>`
+              }
             </div>
           </div>`
         : ""

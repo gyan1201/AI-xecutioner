@@ -20,6 +20,7 @@ import {
   createApproval,
   createComment,
   createIssue,
+  createKnowledge,
   findAgent,
   findIssue,
   pushActivity,
@@ -108,7 +109,7 @@ Working agreements:
 - Cite company knowledge as [1], [2] when you use it. Never invent a metric, customer quote or dashboard.
 - If the evidence is missing, say what would settle it and how much it would cost.
 ${(agent.monthlyBudgetCents ?? 0) > 0 ? `- Stay inside your monthly budget of $${(agent.monthlyBudgetCents / 100).toFixed(2)}.` : "- No spend limit is set; keep each run focused anyway."}
-${agent.instructions ? `\nRole instructions:\n${agent.instructions}` : ""}${skillPrompt(agent.skills)}
+${(agent.memory ?? []).length ? `\nWhat you learned from work you already shipped:\n${agent.memory.slice(0, 5).map((entry) => `- ${entry.issueKey ?? "work"}: ${entry.lesson}`).join("\n")}\n` : ""}${agent.instructions ? `\nRole instructions:\n${agent.instructions}` : ""}${skillPrompt(agent.skills)}
 `;
     if (mode === "review") {
       return `Task type: review\n\n${base}\nYou are reviewing another agent's deliverable against the issue's acceptance criteria. Reply with JSON only:
@@ -477,6 +478,7 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
             run.output = deliverable.slice(0, 2000);
             run.status = "succeeded";
             run.agentName = agent.name;
+            if (issue.status === "done") remember(company, { agent, issue, verdict: run.review, deliverable });
             notify(company, {
               type: "run.succeeded",
               payload: { runId: run.id, issueId: issue.id, agentId: agent.id, verdict: run.review?.verdict ?? null, costCents: run.costCents },
@@ -1066,6 +1068,38 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
       recomputeCompany(company);
     }
     return created;
+  }
+
+  /**
+   * Accepted work is the only thing worth remembering. It becomes one knowledge
+   * document (so retrieval can cite it next cycle) and one line of the agent's
+   * own memory (so the next run starts from what worked).
+   */
+  function remember(company, { agent, issue, verdict, deliverable }) {
+    const at = nowIso();
+    const lesson = clampText(String(verdict?.summary ?? "Shipped and accepted."), 240);
+    const memory = (agent.memory ?? []).filter((entry) => entry.issueId !== issue.id);
+    memory.unshift({ at, issueId: issue.id, issueKey: issue.key, title: issue.title, lesson });
+    agent.memory = memory.slice(0, 12);
+    if (!company.knowledge.some((doc) => doc.sourceIssueId === issue.id)) {
+      company.knowledge.unshift(
+        createKnowledge({
+          title: `${issue.key} — ${issue.title}`,
+          body: `${lesson}\n\n${clampText(deliverable, 2400)}`,
+          tags: ["shipped", ...(issue.labels ?? []).slice(0, 2)],
+          source: "agent",
+          sourceIssueId: issue.id,
+          agentId: agent.id,
+        }),
+      );
+    }
+    pushActivity(company, {
+      kind: "knowledge.shipped",
+      actorId: agent.id,
+      subject: issue.key,
+      detail: `Remembered: ${lesson}`,
+      issueId: issue.id,
+    });
   }
 
   /** How many work runs each issue has already had — the aging signal. */

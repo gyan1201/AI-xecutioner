@@ -64,6 +64,7 @@ A launch is only the first second of a company, so the loop that follows is wher
 * **The standup is a heartbeat.** Routines are dispatched at the start of every cycle *and* on the autonomous tick, cadence follows the company's cycle length, and the first run is due at launch — `nextRunAt` on its own used to mean nothing ever fired.
 * **Work is scheduled fairly.** The next cycle takes the issues with the fewest runs (then the ones untouched longest) before it considers priority, so a `low` review gate can no longer starve behind two `high` items forever.
 * **The board refills.** When everything has shipped, the next cycle opens grounded follow-up work — measure the metric now that something ships, close the next step the last review named — capped so the company keeps a rhythm instead of a template chasing its own tail.
+* **Accepted work is remembered.** A review verdict of `accepted` writes one knowledge document (so retrieval can cite it next cycle) and one line of that agent's memory, replayed in its system prompt on the next run. The agent's **Memory** tab shows exactly what was written, when, and from which issue — the model cannot write there itself.
 * **Planning adapts.** The strategist sees the cycle number, last cycle's focus and how many runs each issue has had, and is asked for a different focus; in simulation the planner is seeded on the board itself, not on the goal string alone.
 
 | | |
@@ -150,6 +151,33 @@ The five healthcare and biology blueprints — ambient clinical scribe, medical 
 
 ---
 
+## Run the example company yourself
+
+`npm run bench` launches **Signal Desk** from one sentence — *"Cut support response time to under five minutes with an AI triage copilot that cites the policy it used"* — into a throwaway data dir (`.bench-data/`, never `./data`), runs five cycles, and prints the numbers plus a pass/fail verdict for each:
+
+```
+launched Signal Desk (co_signal_desk_d3y) in 57 ms
+blueprint: Customer Service Voice Agent (Agentic AI)
+goal: support response time unmeasured → 5 min (decrease)
+  - Noah Bergström · Solution Architect · nvidia/nemotron-3-ultra-550b-a55b · rag-blueprint, nemotron-voice-agent-builder
+  - Idris Bello · Implementation Engineer · nvidia/nemotron-3-super-120b-a12b · nemotron-asr-finetune, cdf-curation-and-retrieval
+  - Aisha Rahman · Quality Lead · nvidia/nemotron-3-super-120b-a12b · rag-eval, rag-perf
+
+work runs: 10 · accepted 10 · rework 0 · accept rate 100%
+shipped: 10/10 · artifacts 10 · spend $0.08 · $0.01 per shipped issue
+routines: Cycle standup: 2 runs (every 5m)
+goal: support response time · baseline unmeasured → 5 min · progress {"accepted":10,"total":10,"pct":100}
+knowledge docs: 11 · agent memory: 2/3
+ledger rows: 110 · simulated only: true
+12/12 checks
+```
+
+The full transcript is in [docs/example-company-run.txt](docs/example-company-run.txt). Every row is simulated (`simulated: true`), because the sandbox has no NVIDIA egress — `npm run bench` forces simulation on purpose, so the numbers are a product benchmark, not a claim of billed inference.
+
+Against the same brief before this work: 5/6 shipped, 63% first-pass accept, **1.20¢ per shipped issue**, 0 routines fired, goal stuck at `0/3` with metric `accepted deliverables`, one issue never run once, and all three hires carrying the same two skills.
+
+---
+
 ## The product
 
 The Paperclip loop, intact, with NVIDIA as the only model provider:
@@ -165,7 +193,7 @@ The Paperclip loop, intact, with NVIDIA as the only model provider:
 * **Goals / Projects / Routines** — metric targets read from the goal sentence (with a unit and a direction), containers, and scheduled prompts. The standup routine follows the company's cycle length and its first run is due at launch, so a cycle actually dispatches it.
 * **Spend** — 4 stat cards, a 14-day spend chart, spend by model, the per-agent spend table with optional caps, and the full ledger. Each row records whether the call was **simulated**, so a demo never looks like billed inference.
 * **Activity** — kind-filtered audit trail with the raw event drawer.
-* **Knowledge** — documents embedded with a NIM embedding model, chunked and reranked before every agent context, plus a retrieval playground that shows embed and rerank scores side by side.
+* **Knowledge** — documents embedded with a NIM embedding model, chunked and reranked before every agent context, plus a retrieval playground that shows embed and rerank scores side by side. Every accepted issue adds one shipped-work document, tagged with its issue and agent.
 
 Guardrails and approvals are enforced in the engine, not the UI: an output that fails the safety NIM is stopped, and an approval policy of `high` parks risky work in the inbox. **Spend is tracked but not capped by default** — every call still writes a ledger row, and a positive cap re-enables the gate (a run over cap is then blocked with a reason).
 

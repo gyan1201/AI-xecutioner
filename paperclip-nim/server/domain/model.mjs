@@ -40,6 +40,9 @@ export function createAgent(overrides = {}) {
     // 0 = unlimited (the default); set a positive cap to re-enable budgeting.
     monthlyBudgetCents: overrides.monthlyBudgetCents ?? 0,
     accent: overrides.accent ?? "#76b900",
+    // What this person learned from accepted work. Written only by the engine,
+    // on acceptance, and shown as-is in the UI — no hidden summarisation.
+    memory: overrides.memory ?? [],
     createdAt: overrides.createdAt ?? nowIso(),
   };
 }
@@ -166,6 +169,9 @@ export function createKnowledge(overrides = {}) {
     body: overrides.body ?? "",
     tags: overrides.tags ?? [],
     source: overrides.source ?? "human",
+    // Provenance for shipped work: which issue (and which agent) produced this.
+    sourceIssueId: overrides.sourceIssueId ?? null,
+    agentId: overrides.agentId ?? null,
     embedding: overrides.embedding ?? null,
     embedModel: overrides.embedModel ?? null,
     createdAt: overrides.createdAt ?? nowIso(),

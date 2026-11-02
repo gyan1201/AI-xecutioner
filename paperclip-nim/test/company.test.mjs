@@ -168,6 +168,27 @@ test("an empty board with shipped work opens the next measurement", async () => 
   assert.ok(created.every((issue) => /support response time|follow-up/i.test(issue.title)), "follow-ups reference the goal");
 });
 
+test("accepted work is remembered in agent memory and citable knowledge", async () => {
+  const goal = "Cut support response time to under five minutes";
+  const plan = planForGoal({ name: "Memory Co", goal });
+  const launched = await service.launchCompany({ name: "Memory Co", mission: goal, plan, runCycle: false });
+  const companyId = launched.company.id;
+  const before = runtime.store.getCompany(companyId);
+  const issue = before.issues.find((entry) => entry.status !== "done");
+  const result = await engine.runIssue({ companyId, issueId: issue.id, actorId: "test" });
+  const company = runtime.store.getCompany(companyId);
+  const updated = company.issues.find((entry) => entry.id === issue.id);
+  const agent = company.agents.find((entry) => entry.id === updated.assigneeId);
+  if (updated.status === "done") {
+    assert.ok((agent.memory ?? []).length >= 1, "an accepted issue leaves a memory entry");
+    assert.equal(agent.memory[0].issueKey, issue.key);
+    assert.ok(company.knowledge.some((doc) => doc.sourceIssueId === issue.id), "the deliverable becomes a knowledge document");
+  } else {
+    assert.equal(result.issue.status, "todo", "a rejected deliverable writes no memory");
+    assert.equal((agent.memory ?? []).length, 0);
+  }
+});
+
 test("goalTitle keeps the goal sentence readable", () => {
   const title = goalTitle("Cut support response time to under five minutes with an AI triage copilot that cites the policy it used");
   assert.ok(title.length <= 140);
