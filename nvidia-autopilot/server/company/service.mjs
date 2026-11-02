@@ -776,6 +776,7 @@ export function createCompanyService({ nim, store, retrieval, roles, getConfig, 
     }
 
     running.set(companyId, true);
+    const alive = () => Boolean(companies.get(companyId));
     company.counters.cycle += 1;
     const cycle = {
       id: randomUUID(),
@@ -835,6 +836,7 @@ export function createCompanyService({ nim, store, retrieval, roles, getConfig, 
 
       for (const assignment of plan.assignments) {
         if (signal?.aborted) throw Object.assign(new Error("Cycle cancelled"), { name: "AbortError" });
+        if (!alive()) throw Object.assign(new Error("Company deleted"), { name: "AbortError", status: 409 });
         const issue = company.issues.find((entry) => entry.key === assignment.issueKey);
         if (!issue || !isActionable(company, issue)) continue;
         const agent =
@@ -996,6 +998,13 @@ export function createCompanyService({ nim, store, retrieval, roles, getConfig, 
       cycle.status = error?.name === "AbortError" ? "cancelled" : "failed";
       cycle.finishedAt = nowIso();
       cycle.summary = `Cycle failed: ${error?.message ?? error}`;
+      if (!alive()) {
+        // The company was deleted mid-cycle: drop anything this cycle wrote
+        // instead of resurrecting a directory nobody owns any more.
+        companies.delete(companyId);
+        running.delete(companyId);
+        throw error;
+      }
       companies.save(company);
       emit(company, cycle.status === "cancelled" ? "cycle.cancelled" : "cycle.failed", {
         message: cycle.summary,
@@ -1050,8 +1059,30 @@ export function createCompanyService({ nim, store, retrieval, roles, getConfig, 
     if (running.has(companyId)) return;
     try {
       await runCycle(companyId, { trigger: "auto" });
+      const fresh = companies.get(companyId);
+      if (fresh) {
+        fresh.autoMode.failures = 0;
+        companies.save(fresh);
+      }
     } catch (error) {
-      if (error?.status === 422) stopAutoMode(companyId, error.message);
+      // A failing cycle must never take the process down (these timers are
+      // fire-and-forget) and must never spin forever on the same error.
+      if (running.has(companyId)) return;
+      const current = companies.get(companyId);
+      if (!current) {
+        stopAutoMode(companyId, "Company deleted");
+        return;
+      }
+      const failures = (current.autoMode.failures ?? 0) + 1;
+      current.autoMode.failures = failures;
+      companies.save(current);
+      companies.log(current, {
+        type: "auto_mode.failure",
+        actor: "system",
+        message: `Auto cycle failed (${failures}): ${error?.message ?? error}`,
+      });
+      const fatal = [409, 422].includes(error?.status) || failures >= (current.autoMode.failureLimit ?? 2);
+      if (fatal) stopAutoMode(companyId, error?.message ?? "Cycle failed");
     }
   }
 

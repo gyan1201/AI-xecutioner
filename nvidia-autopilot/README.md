@@ -239,7 +239,7 @@ nvidia-autopilot/
 │  └─ views/           dashboard, autopilot, chat, knowledge, models,
 │                      guardrails, studio, companies, settings
 ├─ scripts/seed-demo.mjs
-└─ test/               35 tests: engine, tools, retrieval, company, bridge, HTTP, UI
+└─ test/               37 tests: engine, tools, retrieval, company, bridge, HTTP, UI
 ```
 
 Design choices worth knowing:
@@ -258,7 +258,7 @@ Design choices worth knowing:
 ## Tests
 
 ```bash
-npm test                                      # 35 tests, no network, no key
+npm test                                      # 37 tests, no network, no key
 npm i --no-save jsdom && npm test             # + UI render smoke test
 ```
 

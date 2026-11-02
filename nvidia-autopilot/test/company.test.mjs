@@ -279,3 +279,23 @@ test("a company can be exported as a portable bundle", async () => {
   assert.equal(detail.company.id, company.id);
   assert.ok(Array.isArray(detail.events) && detail.events.length > 0);
 });
+
+test("deleting a company mid-run leaves nothing behind and never crashes the timer", async () => {
+  const company = await buildCompany({
+    name: "Vanishing Co",
+    settings: { approvalPolicy: "never", maxIssuesPerCycle: 2 },
+  });
+  runtime.company.startAutoMode(company.id, { everyMinutes: 0.02, maxCycles: 5 });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  runtime.company.deleteCompany(company.id);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  assert.equal(runtime.company.companies.get(company.id), null, "company state must stay deleted");
+  assert.ok(!runtime.company.list().some((entry) => entry.id === company.id));
+  assert.throws(
+    () => runtime.company.get(company.id),
+    (error) => error.status === 404,
+    "lookups must 404, not resurrect data",
+  );
+});
