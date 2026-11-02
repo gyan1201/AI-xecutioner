@@ -15,6 +15,14 @@ Zero runtime dependencies. One Node process. Data on disk. Runs offline in a det
 
 ![Dashboard](docs/screenshot-dashboard.jpg)
 
+Light by default, dark one click away — the toggle lives in the top bar and the
+choice persists. Every surface, border and status colour is a CSS token, so the
+two themes are the same 30 lines of variables rather than two stylesheets.
+
+| Light | Dark |
+| --- | --- |
+| ![Light](docs/screenshot-dashboard.jpg) | ![Dark](docs/screenshot-dark.jpg) |
+
 ### One key, every model
 
 Paste a key from [build.nvidia.com/models](https://build.nvidia.com/models) and the whole catalog — all 97 models, every endpoint family — goes live. Or paste a **code snippet** instead of a key: Paperclip detects the provider (NVIDIA NIM, OpenAI, Groq, OpenRouter, Together, Mistral, DeepSeek, Fireworks, Perplexity, or any OpenAI-compatible host), extracts the key and base URL from it, adds the model and configures the connection.
@@ -212,6 +220,8 @@ There is no account, no telemetry and no cloud dependency: `data/` is the whole 
 Two rules keep the shell from ever painting an empty page, and `test/ui.test.mjs` enforces both:
 
 * **`[hidden]` must beat author CSS.** `styles.css` declares `[hidden] { display: none !important; }`. The palette, modal and drawer roots all set `display: flex/grid`, which otherwise overrides the user-agent `[hidden]` rule and stacks three dark scrims over the app on first paint — the app looks blank while the JS and API are perfectly healthy.
+* **Colour lives in tokens.** Components never hardcode a surface or a status hue — `--panel`, `--text`, `--scrim`, `--chart-N` and friends are defined once for `:root` (dark) and once for `[data-theme="light"]`. A test fails the build on a literal `color: #…` in a component rule, because that is how a theme ends up with an invisible label.
+* **The theme is set before the stylesheet.** A tiny inline script in `index.html` reads `localStorage.paperclip-theme` and sets `data-theme` on `<html>`, so the first paint is already correct (no white flash).
 * **Overlays toggle via the `hidden` property**, never a class, so the rule above always applies.
 
 * **Assets are content-addressed.** The HTML links `/styles.css?v=<hash>` and `/app.js?v=<hash>`, the server stamps the same hash onto every module specifier it serves, and the HTML itself is `no-store`. `Cache-Control: no-cache` alone is only a *request* to revalidate; a proxy or browser that ignores it will happily serve last week's stylesheet, which is how a fixed bug keeps looking broken. Change a file, change the URL — no cache can hold it back.

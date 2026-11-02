@@ -68,10 +68,10 @@ export function issueCard(issue) {
 export function commentCard(comment, company) {
   const author =
     comment.authorType === "human"
-      ? { name: comment.authorId === "you" ? "You" : comment.authorId, accent: "#8b949e" }
+      ? { name: comment.authorId === "you" ? "You" : comment.authorId, accent: "var(--chart-8)" }
       : comment.authorId === "guardrail" || comment.authorId === "system"
-        ? { name: "Guardrail", accent: "#ff7b72" }
-        : company?.agents?.find((agent) => agent.id === comment.authorId) ?? { name: "Agent", accent: "#6995ff" };
+        ? { name: "Guardrail", accent: "var(--chart-7)" }
+        : company?.agents?.find((agent) => agent.id === comment.authorId) ?? { name: "Agent", accent: "var(--chart-3)" };
   const badge =
     comment.kind === "deliverable"
       ? `<span class="pill blue">deliverable</span>`

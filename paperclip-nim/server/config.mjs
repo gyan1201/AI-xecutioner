@@ -149,6 +149,20 @@ export function activeVaultKey({ providerId = "nvidia" } = {}) {
 
 export function addVaultKey({ key, label = "API key", providerId = null, baseUrl = null, verified = false, modelCount = null }) {
   const keys = loadVault();
+  // Pasting the same key twice (or re-running Quick Setup) must not pile up
+  // identical vault rows.
+  const duplicate = keys.find((entry) => entry.key === key);
+  if (duplicate) {
+    saveVault(
+      keys.map((entry) =>
+        entry.id === duplicate.id
+          ? { ...entry, label: label || entry.label, providerId: providerId ?? entry.providerId, baseUrl: baseUrl ?? entry.baseUrl, verified: verified || entry.verified, modelCount: modelCount ?? entry.modelCount }
+          : entry,
+      ),
+    );
+    if (providerId === "nvidia" || providerId === null) saveSettings({ apiKey: key });
+    return duplicate.id;
+  }
   const id = `key_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const sameProvider = keys.filter((entry) => (providerId ? entry.providerId === providerId : !entry.providerId));
   // A provider key becomes "active" only if its provider has no active key yet:

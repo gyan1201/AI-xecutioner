@@ -1,4 +1,4 @@
-import { api, ago, avatar, bars, esc, icon, money, num, pct } from "../lib.js";
+import { api, ago, avatar, bars, esc, icon, md, money, num, pct } from "../lib.js";
 import { agentChip, emptyState, goalProgress, issueRow, modelPill, pageHeader, spendBar } from "./shared.js";
 
 export const title = "Dashboard";
@@ -20,7 +20,7 @@ export async function render(root, ctx) {
     ${pageHeader({
       eyebrow: "Dashboard",
       title: `${esc(company.name)}`,
-      subtitle: esc(company.mission || "No mission set yet — add one in Settings so agents have something to aim at."),
+      subtitle: company.mission ? md(company.mission) : "No mission set yet — add one in Settings so agents have something to aim at.",
       actions: `
         <button class="btn ghost" data-action="plan">${icon("spark", "nav-icon")} Plan only</button>
         <button class="btn primary" data-action="cycle">${icon("play", "nav-icon")} Run cycle</button>`,
@@ -259,14 +259,14 @@ function stackedRunChart(series) {
 
 function statusColor(status) {
   return {
-    backlog: "#8b949e",
-    todo: "#8b949e",
-    in_progress: "#6995ff",
-    in_review: "#e3b341",
-    done: "#3fb950",
-    blocked: "#ff7b72",
+    backlog: "var(--s-backlog)",
+    todo: "var(--s-todo)",
+    in_progress: "var(--s-progress)",
+    in_review: "var(--s-review)",
+    done: "var(--s-done)",
+    blocked: "var(--s-blocked)",
     cancelled: "#6e7681",
-  }[status] ?? "#8b949e";
+  }[status] ?? "var(--s-backlog)";
 }
 
 function statusLabel(status) {

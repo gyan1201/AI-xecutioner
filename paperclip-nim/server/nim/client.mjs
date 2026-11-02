@@ -157,7 +157,7 @@ export function createNimClient({ getConfig, getProviders = () => [], onUsage = 
     if (cfg.simulation) {
       const error = new NimError("Simulation mode is on — this call has no live NIM implementation.", {
         code: "simulation_only",
-        hint: "Add a key in Settings to call this endpoint for real.",
+        hint: "Add or verify a key in Settings to sync against /v1/models.",
       });
       throw error;
     }
@@ -682,7 +682,7 @@ export function createNimClient({ getConfig, getProviders = () => [], onUsage = 
   async function listModels({ signal } = {}) {
     const cfg = config();
     if (cfg.simulation) {
-      const error = new NimError("No credential to verify against /v1/models.", {
+      const error = new NimError("Simulation is on — the live catalog is skipped.", {
         code: "no_credential",
         hint: "Paste a key from build.nvidia.com in Settings.",
       });

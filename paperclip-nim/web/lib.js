@@ -160,27 +160,27 @@ export function avatar(person = {}, extra = "") {
 }
 
 export function colorFor(seed) {
-  const palette = ["#76b900", "#4ec9b0", "#6995ff", "#e3b341", "#ffa657", "#c678dd", "#ff7b72", "#8b949e"];
+  const palette = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)", "var(--chart-7)", "var(--chart-8)"];
   let hash = 0;
   for (const char of String(seed ?? "")) hash = (hash * 31 + char.charCodeAt(0)) % 997;
   return palette[hash % palette.length];
 }
 
 export const STATUS_META = {
-  backlog: { label: "Backlog", color: "#8b949e", pill: "" },
-  todo: { label: "Todo", color: "#8b949e", pill: "" },
-  in_progress: { label: "In progress", color: "#6995ff", pill: "blue" },
-  in_review: { label: "In review", color: "#e3b341", pill: "amber" },
-  done: { label: "Done", color: "#3fb950", pill: "green" },
-  blocked: { label: "Blocked", color: "#ff7b72", pill: "red" },
+  backlog: { label: "Backlog", color: "var(--s-backlog)", pill: "" },
+  todo: { label: "Todo", color: "var(--s-todo)", pill: "" },
+  in_progress: { label: "In progress", color: "var(--s-progress)", pill: "blue" },
+  in_review: { label: "In review", color: "var(--s-review)", pill: "amber" },
+  done: { label: "Done", color: "var(--s-done)", pill: "green" },
+  blocked: { label: "Blocked", color: "var(--s-blocked)", pill: "red" },
   cancelled: { label: "Cancelled", color: "#6e7681", pill: "" },
 };
 
 export const PRIORITY_META = {
-  urgent: { label: "Urgent", color: "#ff7b72", pill: "red" },
-  high: { label: "High", color: "#ffa657", pill: "amber" },
-  medium: { label: "Medium", color: "#e3b341", pill: "" },
-  low: { label: "Low", color: "#8b949e", pill: "" },
+  urgent: { label: "Urgent", color: "var(--pr-urgent)", pill: "red" },
+  high: { label: "High", color: "var(--pr-high)", pill: "amber" },
+  medium: { label: "Medium", color: "var(--pr-medium)", pill: "" },
+  low: { label: "Low", color: "var(--pr-low)", pill: "" },
 };
 
 export function statusPill(status) {
@@ -346,7 +346,7 @@ export function stackedBars(series, { height = 108 } = {}) {
           return `<i style="display:block;height:${(value / max) * 100}%;background:${entry.color};opacity:.9"></i>`;
         })
         .join("");
-      return `<div class="bar" style="height:${Math.max(2, Math.round((total / max) * 100))}%;display:flex;flex-direction:column-reverse;background:#1a1a20">${parts}</div>`;
+      return `<div class="bar" style="height:${Math.max(2, Math.round((total / max) * 100))}%;display:flex;flex-direction:column-reverse;background:var(--chart-track)">${parts}</div>`;
     })
     .join("")}</div>`;
 }
@@ -359,7 +359,7 @@ export function donut(segments, { size = 92, thickness = 10 } = {}) {
   const arcs = segments
     .map((segment) => {
       const length = (segment.value / total) * circumference;
-      const arc = `<circle cx="${size / 2}" cy="${size / 2}" r="${radius}" fill="none" stroke="${segment.color}" stroke-width="${thickness}" stroke-dasharray="${length} ${circumference - length}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${size / 2} ${size / 2})" />`;
+      const arc = `<circle cx="${size / 2}" cy="${size / 2}" r="${radius}" fill="none" style="stroke:${segment.color}" stroke-width="${thickness}" stroke-dasharray="${length} ${circumference - length}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${size / 2} ${size / 2})" />`;
       offset += length;
       return arc;
     })

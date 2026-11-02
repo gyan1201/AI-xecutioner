@@ -4,12 +4,12 @@ import { emptyState, issueCard, issueRow, pageHeader, statusCounts } from "./sha
 export const title = "Issues";
 
 const BOARD_COLUMNS = [
-  { status: "backlog", label: "Backlog", color: "#8b949e" },
-  { status: "todo", label: "Todo", color: "#8b949e" },
-  { status: "in_progress", label: "In progress", color: "#6995ff" },
-  { status: "in_review", label: "In review", color: "#e3b341" },
-  { status: "blocked", label: "Blocked", color: "#ff7b72" },
-  { status: "done", label: "Done", color: "#3fb950" },
+  { status: "backlog", label: "Backlog", color: "var(--s-backlog)" },
+  { status: "todo", label: "Todo", color: "var(--s-todo)" },
+  { status: "in_progress", label: "In progress", color: "var(--s-progress)" },
+  { status: "in_review", label: "In review", color: "var(--s-review)" },
+  { status: "blocked", label: "Blocked", color: "var(--s-blocked)" },
+  { status: "done", label: "Done", color: "var(--s-done)" },
 ];
 
 export async function render(root, ctx) {

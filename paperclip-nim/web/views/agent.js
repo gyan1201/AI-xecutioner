@@ -127,7 +127,7 @@ export async function render(root, ctx) {
                   ? thread
                       .map(
                         (message) => `<div class="msg ${message.role === "user" ? "user" : "assistant"}">
-                          ${message.role === "user" ? avatar({ name: "You", accent: "#8b949e" }, "sm") : avatar(agent, "sm")}
+                          ${message.role === "user" ? avatar({ name: "You", accent: "var(--chart-8)" }, "sm") : avatar(agent, "sm")}
                           <div class="msg-body">
                             <div class="prose">${md(message.content)}</div>
                             ${message.role === "assistant" ? `<div class="msg-meta">
@@ -300,7 +300,7 @@ export async function render(root, ctx) {
       autoGrow(input);
       const node = document.createElement("div");
       node.className = "msg user";
-      node.innerHTML = `${avatar({ name: "You", accent: "#8b949e" }, "sm")}<div class="msg-body"><div class="prose">${md(message)}</div></div>`;
+      node.innerHTML = `${avatar({ name: "You", accent: "var(--chart-8)" }, "sm")}<div class="msg-body"><div class="prose">${md(message)}</div></div>`;
       log.append(node);
       const reply = document.createElement("div");
       reply.className = "msg assistant";

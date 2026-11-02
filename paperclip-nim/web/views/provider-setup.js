@@ -152,7 +152,7 @@ export function detectionHtml(detection, { available = [] } = {}) {
         .join("")}
       ${
         detection.warnings.length
-          ? `<div class="hint" style="margin-top:7px;color:#e3b341;font-size:11.5px">${detection.warnings.map((warning) => esc(warning)).join("<br />")}</div>`
+          ? `<div class="hint" style="margin-top:7px;color:var(--amber-text);font-size:11.5px">${detection.warnings.map((warning) => esc(warning)).join("<br />")}</div>`
           : ""
       }
       ${

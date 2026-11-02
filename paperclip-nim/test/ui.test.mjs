@@ -56,6 +56,27 @@ test("the shell can announce a boot failure without JavaScript frameworks", () =
   assert.match(app, /__pcBooted\s*=\s*true/, "app.js must mark the boot as complete after the first render");
 });
 
+test("light and dark themes are both fully tokenised", () => {
+  const light = css.slice(css.indexOf('[data-theme="light"]'));
+  assert.ok(light.length > 0, "styles.css must define a light theme block");
+  for (const token of ["--bg", "--panel", "--text", "--border", "--accent-ink", "--scrim", "--chart-1", "--s-progress"]) {
+    assert.match(light, new RegExp(`${token}:`), `light theme must define ${token}`);
+  }
+  // No component may hardcode a surface colour: that is how a theme ends up
+  // with an unreadable panel or an invisible label.
+  const body = css.slice(css.indexOf("}", css.indexOf('[data-theme="light"]')) + 1);
+  const literal = body.match(/(?:background|color|border-color|border-top-color)\s*:\s*#[0-9a-fA-F]{3,8}/g) ?? [];
+  assert.deepEqual(literal, [], `component rules must use tokens, found: ${literal.join(", ")}`);
+});
+
+test("the theme is set before the stylesheet loads, and the toggle exists", () => {
+  assert.match(html, /<html[^>]+data-theme="light"/, "light is the default theme");
+  assert.match(html, /paperclip-theme/, "index.html must bootstrap the stored theme before paint");
+  assert.match(html, /id="theme-toggle"/, "the top bar needs a theme toggle");
+  assert.match(app, /dataset\.theme/, "app.js must apply the theme");
+  assert.match(app, /localStorage\.setItem\(THEME_KEY/, "the choice must persist");
+});
+
 test("no remote font or stylesheet import can block first paint", () => {
   assert.doesNotMatch(css, /@import\s+url\(["']?https?:/, "styles.css must not import remote CSS/fonts");
   assert.doesNotMatch(html, /<link[^>]+href="https?:/, "index.html must not link remote assets");

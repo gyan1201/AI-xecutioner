@@ -33,7 +33,7 @@ export async function render(root, ctx) {
       nvidia: { configured: data.nvidiaUnlocked, models: data.catalogTotal ?? data.summary.total, live: providerData.config?.mode === "live" },
     })}
 
-    ${data.error ? `<div class="card" style="border-color:rgba(227,179,65,.3);margin-bottom:14px"><div class="row" style="gap:8px;color:#f0c94a;font-size:12.5px">${icon("shield", "nav-icon")}<b>Live sync unavailable</b><span style="color:var(--text-2)">${esc(data.error)} — showing the curated snapshot.</span></div></div>` : ""}
+    ${data.error ? `<div class="card" style="border-color:rgba(227,179,65,.3);margin-bottom:14px"><div class="row" style="gap:8px;color:var(--amber-text);font-size:12.5px">${icon("shield", "nav-icon")}<b>Live sync unavailable</b><span style="color:var(--text-2)">${esc(data.error)} — showing the curated snapshot.</span></div></div>` : ""}
 
     <div class="card" style="margin-bottom:14px">
       <div class="row" style="gap:8px;flex-wrap:wrap">

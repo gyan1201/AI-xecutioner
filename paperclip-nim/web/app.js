@@ -541,6 +541,41 @@ async function boot({ keepRoute = false } = {}) {
 window.addEventListener("hashchange", render);
 $("#company-switch").addEventListener("click", companyMenu);
 $("#new-issue").addEventListener("click", openNewIssue);
+/* ---------------------------------------------------------------- theme */
+
+const THEME_KEY = "paperclip-theme";
+
+function currentTheme() {
+  return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+}
+
+function applyTheme(theme, { persist = true } = {}) {
+  const next = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = next;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", next === "dark" ? "#060607" : "#ffffff");
+  const toggle = $("#theme-toggle");
+  if (toggle) {
+    toggle.title = next === "dark" ? "Switch to light theme" : "Switch to dark theme";
+    toggle.setAttribute("aria-label", toggle.title);
+    toggle.setAttribute("aria-pressed", String(next === "dark"));
+  }
+  if (persist) {
+    try {
+      localStorage.setItem(THEME_KEY, next);
+    } catch {
+      /* private mode — the choice simply does not persist */
+    }
+  }
+}
+
+function toggleTheme() {
+  applyTheme(currentTheme() === "dark" ? "light" : "dark");
+}
+
+$("#theme-toggle")?.addEventListener("click", toggleTheme);
+applyTheme(currentTheme(), { persist: false });
+
 $("#global-search").addEventListener("click", openPalette);
 $("#run-cycle").addEventListener("click", openCycleRunner);
 

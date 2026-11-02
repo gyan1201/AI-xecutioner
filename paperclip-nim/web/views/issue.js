@@ -43,7 +43,7 @@ export async function render(root, ctx) {
         </div>
 
         ${issue.blockedReason ? `<div class="card" style="margin-top:14px;border-color:rgba(255,123,114,.32);background:rgba(255,123,114,.04)">
-          <div class="row" style="gap:8px;color:#ff9d95;font-size:12.5px">${icon("shield", "nav-icon")}<b>Blocked</b><span style="color:var(--text-2)">${esc(issue.blockedReason)}</span></div>
+          <div class="row" style="gap:8px;color:var(--red-text);font-size:12.5px">${icon("shield", "nav-icon")}<b>Blocked</b><span style="color:var(--text-2)">${esc(issue.blockedReason)}</span></div>
         </div>` : ""}
 
         <div class="card" style="margin-top:14px">
@@ -189,7 +189,7 @@ export async function render(root, ctx) {
         ${
           pendingApproval
             ? `<div class="card" style="border-color:rgba(255,123,114,.32)">
-                <div class="card-title" style="color:#ff9d95">Approval needed</div>
+                <div class="card-title" style="color:var(--red-text)">Approval needed</div>
                 <div style="font-size:12.5px;color:var(--text-2);margin-bottom:6px">${esc(pendingApproval.action)}</div>
                 <div class="hint" style="margin-bottom:10px">${esc(pendingApproval.reason)}</div>
                 <div class="row" style="gap:6px">
