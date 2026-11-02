@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 
 process.env.PAPERCLIP_DATA_DIR = mkdtempSync(join(tmpdir(), "paperclip-nim-api-"));
+process.env.LOG_REQUESTS = "0";
 delete process.env.NVIDIA_API_KEY;
 delete process.env.NIM_API_KEY;
 

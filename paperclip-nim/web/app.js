@@ -526,6 +526,7 @@ async function boot({ keepRoute = false } = {}) {
     }
     if (!keepRoute && !location.hash) location.hash = "/dashboard";
     await render();
+    window.__pcBooted = true;
     api("/api/blueprints").then((data) => {
       state.blueprintList = data.blueprints;
     });

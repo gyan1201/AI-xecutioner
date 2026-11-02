@@ -46,7 +46,14 @@
             </button>
           </div>
         </header>
-        <div class="view" id="view" role="main"></div>
+        <div class="view" id="view" role="main">
+          <div class="boot" id="boot">
+            <div class="boot-mark">✂</div>
+            <h1>Paperclip × NVIDIA NIM</h1>
+            <p id="boot-status">Starting the control room…</p>
+            <noscript><p class="boot-error">This app needs JavaScript. Enable it and reload.</p></noscript>
+          </div>
+        </div>
       </main>
     </div>
 
@@ -62,6 +69,37 @@
     <div class="toasts" id="toasts" aria-live="polite"></div>
     <div class="drawer-root" id="drawer-root" hidden></div>
 
+    <!-- Runs as a classic script so it can report a failure even when the module graph
+         never loads: a blank screen is never an acceptable error state. -->
+    <script>
+      window.__pcBooted = false;
+      window.__pcFail = function (message) {
+        var status = document.getElementById("boot-status");
+        if (status) {
+          status.textContent = message;
+          status.className = "boot-error";
+        }
+      };
+      window.addEventListener("error", function (event) {
+        if (window.__pcBooted) return;
+        var target = event.target;
+        if (target && target.tagName === "SCRIPT") {
+          window.__pcFail("Could not load " + (target.src || "a script") + " — reload, and check the server log.");
+          return;
+        }
+        window.__pcFail("Startup error: " + (event.message || "unknown") + " — see the browser console.");
+      }, true);
+      window.addEventListener("unhandledrejection", function (event) {
+        if (window.__pcBooted) return;
+        var reason = event.reason;
+        window.__pcFail("Startup failed: " + ((reason && reason.message) || reason || "unknown error"));
+      });
+      setTimeout(function () {
+        if (!window.__pcBooted) {
+          window.__pcFail("Still starting after 8s. Check /api/health, then reload.");
+        }
+      }, 8000);
+    </script>
     <script type="module" src="/app.js"></script>
   </body>
 </html>

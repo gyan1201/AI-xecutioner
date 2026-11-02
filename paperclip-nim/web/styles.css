@@ -4,7 +4,8 @@
    an operations tool: everything on screen is data, nothing is decoration.
    ========================================================================== */
 
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+/* No external font fetch: the shell must paint with zero third-party requests,
+   which is what makes the app safe inside a sandboxed preview iframe. */
 
 :root {
   --bg: #060607;
@@ -177,6 +178,32 @@ kbd {
 .stack { display: flex; flex-direction: column; gap: 10px; }
 .grid { display: grid; gap: 12px; }
 .hide { display: none !important; }
+
+/* Boot shell: visible before the first render, and the place errors land. */
+.boot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 62vh;
+  text-align: center;
+  color: var(--muted);
+}
+.boot-mark {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--accent-border);
+  border-radius: 12px;
+  color: var(--accent);
+  background: var(--accent-dim);
+  font-size: 20px;
+}
+.boot h1 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); }
+.boot p { margin: 0; font-size: 13px; max-width: 52ch; line-height: 1.55; }
+.boot .boot-error { color: var(--amber); font-family: var(--mono); font-size: 12px; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .btn {

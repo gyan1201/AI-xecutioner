@@ -761,17 +761,35 @@ export function createApp(runtime) {
       }
     }
     const ext = extname(file).toLowerCase();
+    const size = statSync(file).size;
     const headers = {
       "Content-Type": MIME[ext] ?? "application/octet-stream",
-      "Cache-Control": ext === ".html" ? "no-store" : "public, max-age=120",
+      // Explicit length: chunked responses are the first thing a proxy lets you down on.
+      "Content-Length": String(size),
+      // HTML/JS/CSS revalidate on every load: a stale module graph looks exactly
+      // like a blank page, and this app changes often.
+      "Cache-Control": [".html", ".js", ".css", ".svg"].includes(ext) ? "no-cache" : "public, max-age=600",
     };
     res.writeHead(200, headers);
+    if (req.method === "HEAD") {
+      res.end();
+      return;
+    }
     createReadStream(file).pipe(res);
   }
 
   return async function handler(req, res) {
     const url = new URL(req.url ?? "/", "http://localhost");
     const pathname = decodeURIComponent(url.pathname);
+
+    // Request log: enough to tell "the browser never reached us" from "the app threw".
+    const startedAt = Date.now();
+    const host = String(req.headers.host ?? "");
+    res.on("finish", () => {
+      if (process.env.LOG_REQUESTS === "0") return;
+      const origin = host.includes("e2b.app") ? "preview" : /^(127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])/.test(host) ? "local" : host || "unknown";
+      console.log(`[req] ${req.method} ${pathname} ${res.statusCode} ${Date.now() - startedAt}ms ${origin}`);
+    });
 
     // CORS for programmatic use (self-hosted single origin by default).
     res.setHeader("Access-Control-Allow-Origin", "*");
