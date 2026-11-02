@@ -4,8 +4,8 @@ import { createRetrieval } from "./retrieval.mjs";
 import { createAutopilot } from "./autopilot.mjs";
 import { createCompanyService } from "./company/service.mjs";
 import { createPaperclipClient } from "./paperclip.mjs";
-import { loadConfig, writeRuntimeSettings, readRuntimeSettings, publicConfig } from "./config.mjs";
-import { MODEL_PRESETS, ROLE_DEFINITIONS, describeModel, resolveRoles } from "./catalog.mjs";
+import { loadConfig, migrateLegacyKey, writeRuntimeSettings, readRuntimeSettings, publicConfig } from "./config.mjs";
+import { MODEL_CATALOG, MODEL_PRESETS, ROLE_DEFINITIONS, describeModel, resolveRoles } from "./catalog.mjs";
 import { pickDefaultModel } from "./keyintake.mjs";
 
 /**
@@ -13,6 +13,12 @@ import { pickDefaultModel } from "./keyintake.mjs";
  * overrides and call counters that the HTTP layer reads.
  */
 export function createRuntime({ onEvent } = {}) {
+  // Keys pasted before the vault existed are moved into it once, on boot.
+  try {
+    migrateLegacyKey();
+  } catch {
+    /* never block startup on key bookkeeping */
+  }
   const store = createStore();
   const metrics = {
     startedAt: new Date().toISOString(),
@@ -79,7 +85,7 @@ export function createRuntime({ onEvent } = {}) {
       if (modelCache.models.length) return { ...modelCache, error: error.message, cached: true };
       // Discovery failed and nothing cached: fall back to curated presets so the
       // UI still renders and roles still resolve.
-      const models = MODEL_PRESETS.map((preset) => describeModel(preset.id));
+      const models = MODEL_CATALOG.map((preset) => describeModel(preset.id));
       const roles = resolveRoles(models.map((model) => model.id));
       modelCache = { at: 0, models, roles, error: error.message, degraded: true };
       return { ...modelCache, cached: false };

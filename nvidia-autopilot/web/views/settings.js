@@ -1,7 +1,12 @@
-import { api, esc, reportError, toast } from "../lib.js";
+import { api, esc, fmt, reportError, toast } from "../lib.js";
 
 export async function render(el, ctx) {
-  const settings = await api.get("/api/settings");
+  const [settings, vault, catalog] = await Promise.all([
+    api.get("/api/settings"),
+    api.get("/api/keys").catch(() => ({ keys: [], count: 0, needsApiKey: true })),
+    api.get("/api/models/catalog").catch(() => ({ groups: [], total: 0, counts: {}, defaultModel: null })),
+  ]);
+  const defaultModel = catalog.defaultModel ?? settings.defaultModel ?? null;
 
   el.innerHTML = `
     <div class="spread" style="margin-bottom:var(--space-4)">
@@ -47,6 +52,58 @@ export async function render(el, ctx) {
           <div id="paste-preview" style="margin-top:var(--space-3)"></div>
           <div id="key-result" style="margin-top:var(--space-3)"></div>
           <div id="test-result" style="margin-top:var(--space-3)"></div>
+        </div>
+
+        <div class="card" id="keys-card">
+          <div class="card-head">
+            <span class="card-title">API key database</span>
+            <span class="row-wrap">
+              <span class="badge ${vault.count ? "badge-green" : "badge-amber"}">${vault.count} stored</span>
+              <span class="badge badge-dim">active ${esc(vault.activeHint ?? "none")}</span>
+            </span>
+          </div>
+          <p class="small muted">
+            Keys live in <code>data/keys.json</code> (0600) and are used <strong>in the background</strong> — no prompt
+            per call. Rotate any time; the app asks for a key only when the database is empty.
+          </p>
+          <div class="stack" style="margin-top:var(--space-3);gap:8px" id="key-list">
+            ${
+              (vault.keys ?? []).length
+                ? (vault.keys ?? [])
+                    .map(
+                      (key) => `<div class="spread row-wrap" style="border:1px solid var(--line);border-radius:var(--radius);padding:8px 10px">
+                        <div>
+                          <div class="row-wrap">
+                            <strong class="small">${esc(key.label)}</strong>
+                            <span class="mono tiny">${esc(key.keyHint)}</span>
+                            ${key.id === vault.activeId ? '<span class="badge badge-green">active</span>' : ""}
+                            <span class="badge ${key.verified ? "badge-green" : "badge-amber"}">${key.verified ? `verified · ${key.modelCount} models` : esc(key.verifyReason ?? "unverified")}</span>
+                          </div>
+                          <div class="tiny faint">${esc(key.source)} · ${key.lastVerifiedAt ? `checked ${esc(new Date(key.lastVerifiedAt).toLocaleString())}` : `added ${esc(new Date(key.addedAt ?? Date.now()).toLocaleString())}`}</div>
+                        </div>
+                        <div class="row">
+                          ${key.id === vault.activeId ? "" : `<button class="btn btn-sm" data-activate-key="${esc(key.id)}">Use</button>`}
+                          <button class="btn btn-sm btn-danger" data-remove-key="${esc(key.id)}">Remove</button>
+                        </div>
+                      </div>`,
+                    )
+                    .join("")
+                : `<div class="banner"><span>◐</span><div><strong>No key in the database.</strong> Paste one below — the app will ask once, then keep it and use it in the background.</div></div>`
+            }
+          </div>
+          <div class="field" style="margin-top:var(--space-3)">
+            <label for="key-label">Label <span class="faint">(optional)</span></label>
+            <input id="key-label" placeholder="work account" />
+          </div>
+          <div class="field" style="margin-top:8px">
+            <label for="vault-paste">Key, env line, or snippet</label>
+            <textarea id="vault-paste" rows="3" spellcheck="false" placeholder="nvapi-… or the whole request snippet"></textarea>
+          </div>
+          <div class="row-wrap" style="margin-top:var(--space-3)">
+            <button class="btn btn-primary btn-sm" id="add-key">Store &amp; verify</button>
+            <span class="tiny faint">Verified keys switch the app to live inference automatically.</span>
+          </div>
+          <div id="vault-result" style="margin-top:var(--space-3)"></div>
         </div>
 
         <div class="card">
@@ -151,6 +208,52 @@ NVIDIA_AUTOPILOT_DATA_DIR=./data</code></pre>
           </ul>
         </div>
       </div>
+    </div>
+
+    <div class="card" id="models-card" style="margin-top:var(--space-4)">
+      <div class="card-head">
+        <span class="card-title">Model catalog</span>
+        <span class="row-wrap">
+          <span class="badge badge-dim" id="catalog-count">${catalog.total ?? 0} models</span>
+          <span class="tiny faint">${catalog.counts?.live ?? 0} live · ${catalog.counts?.catalog ?? 0} catalog · ${catalog.counts?.pasted ?? 0} pasted</span>
+          <a class="small" href="https://build.nvidia.com/models" target="_blank" rel="noreferrer">build.nvidia.com/models ↗</a>
+        </span>
+      </div>
+      <p class="small muted">
+        Every NIM this app can drive — chat, reasoning, tool use, vision, code, embeddings, rerank, safety,
+        image, audio and biology — with the family each one belongs to and where it came from. <strong>Use</strong>
+        sets it as the Chat lab default; roles can be pinned in Models &amp; routing.
+      </p>
+      <div class="field-row" style="margin-top:var(--space-3)">
+        <div class="field">
+          <label for="model-search">Search</label>
+          <input id="model-search" placeholder="nemotron, vision, embed…" />
+        </div>
+        <div class="field">
+          <label for="model-group">Family</label>
+          <select id="model-group">
+            <option value="">all families</option>
+            ${(catalog.groups ?? []).map((group) => `<option value="${esc(group.capability)}">${esc(group.label)} (${group.models.length})</option>`).join("")}
+          </select>
+        </div>
+        <div class="field">
+          <label for="model-source">Source</label>
+          <select id="model-source">
+            <option value="">any</option>
+            <option value="live">live from /v1/models</option>
+            <option value="catalog">curated catalog</option>
+            <option value="simulated">simulated</option>
+            <option value="pasted">from your paste</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrap" style="margin-top:var(--space-3);max-height:460px;overflow:auto">
+        <table>
+          <thead><tr><th>Model</th><th>Family</th><th class="num">Context</th><th>Source</th><th></th></tr></thead>
+          <tbody id="model-rows"></tbody>
+        </table>
+      </div>
+      <p class="tiny faint" id="models-empty" style="margin-top:8px"></p>
     </div>
   `;
 
@@ -293,4 +396,145 @@ NVIDIA_AUTOPILOT_DATA_DIR=./data</code></pre>
       "Cost rates saved",
     ),
   );
+
+  /* ------------------------------ key database ------------------------------ */
+
+  const vaultResult = () => el.querySelector("#vault-result");
+
+  el.querySelectorAll("[data-activate-key]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        await api.patch(`/api/keys/${button.dataset.activateKey}`, { active: true });
+        toast("Key activated");
+        await ctx.refresh();
+        window.dispatchEvent(new HashChangeEvent("hashchange"));
+        location.reload();
+      } catch (error) {
+        reportError(error);
+      }
+    });
+  });
+
+  el.querySelectorAll("[data-remove-key]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!confirm("Remove this key from the database?")) return;
+      try {
+        await api.del(`/api/keys/${button.dataset.removeKey}`);
+        toast("Key removed");
+        await ctx.refresh();
+        location.reload();
+      } catch (error) {
+        reportError(error);
+      }
+    });
+  });
+
+  el.querySelector("#add-key").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const text = el.querySelector("#vault-paste").value.trim();
+    if (!text) return toast("Paste a key or snippet first.", "warn");
+    button.disabled = true;
+    button.innerHTML = `<span class="spinner"></span> storing`;
+    vaultResult().innerHTML = "";
+    try {
+      const result = await api.post("/api/keys", {
+        text,
+        label: el.querySelector("#key-label").value.trim() || undefined,
+        timeoutMs: 12_000,
+      });
+      const verification = result.verification ?? {};
+      vaultResult().innerHTML = verification.ok
+        ? `<div class="banner green"><span>✓</span><div><strong>Stored and verified</strong> · ${verification.modelCount} models · ${esc(result.key.keyHint)}</div></div>`
+        : verification.reason === "unreachable"
+          ? `<div class="banner"><span>◐</span><div><strong>Stored.</strong> NVIDIA is unreachable from this host, so simulation stays on until it is.</div></div>`
+          : `<div class="banner red"><span>✕</span><div><strong>Stored, but not accepted (${esc(verification.reason ?? "error")}).</strong> ${esc(verification.hint ?? "")}</div></div>`;
+      toast(verification.ok ? "Key stored and verified" : "Key stored");
+      el.querySelector("#vault-paste").value = "";
+      await ctx.refresh();
+      if (verification.ok) setTimeout(() => location.reload(), 800);
+    } catch (error) {
+      vaultResult().innerHTML = `<div class="banner red"><span>✕</span><div><strong>${esc(error.message)}</strong>${error.hint ? ` ${esc(error.hint)}` : ""}</div></div>`;
+    } finally {
+      button.disabled = false;
+      button.textContent = "Store & verify";
+    }
+  });
+
+  /* ------------------------------- model catalog ---------------------------- */
+
+  const rows = el.querySelector("#model-rows");
+  const empty = el.querySelector("#models-empty");
+  const searchInput = el.querySelector("#model-search");
+  const groupSelect = el.querySelector("#model-group");
+  const sourceSelect = el.querySelector("#model-source");
+  const flat = (catalog.groups ?? []).flatMap((group) =>
+    group.models.map((model) => ({ ...model, group: group.capability, groupLabel: group.label })),
+  );
+  const sourceBadge = (source) =>
+    ({
+      live: '<span class="badge badge-green">live</span>',
+      catalog: '<span class="badge badge-dim">catalog</span>',
+      simulated: '<span class="badge badge-amber">simulated</span>',
+      pasted: '<span class="badge badge-violet">paste</span>',
+    })[source] ?? '<span class="badge badge-dim">catalog</span>';
+
+  function paintModels() {
+    const search = searchInput.value.trim().toLowerCase();
+    const group = groupSelect.value;
+    const source = sourceSelect.value;
+    const visible = flat.filter(
+      (model) =>
+        (!group || model.group === group) &&
+        (!source || model.source === source) &&
+        (!search ||
+          model.id.toLowerCase().includes(search) ||
+          String(model.label).toLowerCase().includes(search) ||
+          (model.capabilities ?? []).some((capability) => capability.includes(search))),
+    );
+    rows.innerHTML = visible
+      .map(
+        (model) => `<tr>
+          <td>
+            <div class="spread row-wrap" style="gap:8px">
+              <span class="mono small">${esc(model.id)}</span>
+              ${model.id === defaultModel ? '<span class="badge badge-green">chat default</span>' : ""}
+            </div>
+            <div class="tiny faint">${esc(model.label)}</div>
+          </td>
+          <td>
+            <span class="chip">${esc(model.groupLabel)}</span>
+            <div class="chips" style="margin-top:4px">${(model.capabilities ?? [])
+              .map((capability) => `<span class="tiny faint">${esc(capability)}</span>`)
+              .join(" · ")}</div>
+          </td>
+          <td class="num mono tiny">${model.contextWindow ? esc(fmt.tokens(model.contextWindow)) : "—"}</td>
+          <td>${sourceBadge(model.source)}</td>
+          <td>
+            <button class="btn btn-sm ${model.id === defaultModel ? "" : "btn-ghost"}" data-use-model="${esc(model.id)}"
+              ${model.id === defaultModel ? "disabled" : ""}>Use</button>
+          </td>
+        </tr>`,
+      )
+      .join("");
+    empty.textContent = visible.length
+      ? `${visible.length} of ${flat.length} models`
+      : "No model matches those filters.";
+    rows.querySelectorAll("[data-use-model]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        try {
+          await api.put("/api/settings", { defaults: { chatModel: button.dataset.useModel } });
+          toast(`${button.dataset.useModel.split("/").pop()} is now the chat default`);
+          await ctx.refresh();
+          location.reload();
+        } catch (error) {
+          reportError(error);
+        }
+      });
+    });
+  }
+
+  searchInput.addEventListener("input", paintModels);
+  groupSelect.addEventListener("change", paintModels);
+  sourceSelect.addEventListener("change", paintModels);
+  paintModels();
 }

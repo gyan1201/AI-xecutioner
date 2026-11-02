@@ -49,6 +49,58 @@ Full detail: [`docs/company-os.md`](docs/company-os.md).
 
 ---
 
+## Key database (background) and the full model catalog
+
+**Settings → API key database** keeps every credential you paste in
+`data/keys.json` (mode `0600`) — label, masked hint, verified state, model count,
+last check. The app uses the active key **in the background**: no prompt per call,
+no key in the browser, rotation without a restart.
+
+| Precedence | Source |
+| --- | --- |
+| 1 | key saved in `data/settings.json` (explicit operator paste) |
+| 2 | active key in the vault (`data/keys.json`) |
+| 3 | `NVIDIA_API_KEY` in the environment |
+
+- **Asks only when the database is empty.** With no key anywhere, the UI opens a
+  one-time dialog on launch (and the Settings card says "No key in the database").
+  Dismissing remembers the choice for the session; a verified key never prompts again.
+- **Rotation and multi-account.** Store several keys, switch with **Use**, remove
+  with **Remove**. Removing the active settings key falls back to the vault instead
+  of dropping to simulation. Keys pasted before the vault existed are migrated on boot.
+- **Verification.** `POST /api/keys` parses the same free text as the intake
+  (bare key, env line, whole snippet), verifies against `/v1/models`, and switches to
+  live inference only when NVIDIA accepts it.
+
+```bash
+curl -s localhost:8787/api/keys                       # masked list + active
+curl -s localhost:8787/api/keys -H 'content-type: application/json' \
+  -d '{"text":"nvapi-…","label":"work"}'
+curl -s -X PATCH localhost:8787/api/keys/<id> -H 'content-type: application/json' -d '{"active":true}'
+curl -s -X DELETE localhost:8787/api/keys/<id>
+```
+
+**Settings → Model catalog** lists everything this app can drive — **119 models**
+across 9 families (chat, vision, code, embedding, rerank, safety, image, audio,
+biology) from [build.nvidia.com/models](https://build.nvidia.com/models) — with a
+search box, family and source filters, context window, and the family each model
+belongs to. Each row is labelled with where it came from: `live` (discovered from
+`/v1/models`), `catalog` (curated preset), `simulated` (offline stand-in) or
+`paste` (an id that arrived in a snippet). **Use** sets it as the Chat lab default;
+agent roles are still pinned in Models & routing.
+
+```bash
+curl -s "localhost:8787/api/models/catalog"           # grouped catalog + counts
+curl -s "localhost:8787/api/models/catalog?q=vision"  # server-side search
+curl -s localhost:8787/api/settings -H 'content-type: application/json' \
+  -X PUT -d '{"defaults":{"chatModel":"meta/llama-3.1-8b-instruct"}}'
+```
+
+Live discovery always wins: when the account can see a model, it is marked `live`
+and its capabilities come from the naming heuristics, not from the preset list.
+
+---
+
 ## What auto mode actually does
 
 Give it a goal — *"Make self-serve onboarding reach 20% QoQ activation growth"* —
@@ -212,7 +264,7 @@ hint.
 | **Models & routing** | Live catalog from `build.nvidia.com`, filter by capability, pin a model per agent role. |
 | **Guardrails** | Screen any text with NVIDIA safety models and see the raw verdict. |
 | **Visual studio** | Prompt → image via hosted diffusion endpoints, with prompt rewriting by a NIM. |
-| **Settings** | Paste-anything key intake, endpoints, cost rates, simulation switch, extracted defaults, data locations. |
+| **Settings** | Key database (background, rotatable), full model catalog with search and families, paste-anything intake, endpoints, cost rates, simulation switch, data locations. |
 
 Agent roles resolve automatically: the first pinned model that exists in the live
 catalog wins, otherwise the highest-capability discovered model, otherwise a
@@ -228,6 +280,11 @@ POST   /api/settings/key           paste a key or snippet → parse, verify, con
 POST   /api/settings/key/verify    re-test the stored credential
 POST   /api/snippets/parse         extract a chat payload from a pasted snippet
 POST   /api/snippets/run           replay that exact request through NIM
+GET    /api/models/catalog         every model, grouped by family (+ counts, search)
+GET    /api/keys                   masked key database + active key
+POST   /api/keys                   store a key/snippet (parse + verify)
+PATCH  /api/keys/:id               rename or activate
+DELETE /api/keys/:id               remove
 GET    /api/models                 live catalog + capability labels + role routing
 POST   /api/chat                   chat completion
 POST   /api/chat/stream            SSE token stream
@@ -289,22 +346,22 @@ nvidia-autopilot/
 │  ├─ autopilot.mjs    plan → execute → review → report state machine
 │  ├─ tools.mjs        agent tool runtime (incl. a safe expression parser)
 │  ├─ retrieval.mjs    chunk → embed → cosine → rerank RAG
-│  ├─ catalog.mjs      model presets, capability inference, role routing, tools
+│  ├─ catalog.mjs      119-model catalog, capability inference, role routing, tools
 │  ├─ company/         Company OS: store.mjs (state, ledger, approvals),
 │  │                   org.mjs (goal → org design), service.mjs (cycles, auto mode)
 │  ├─ paperclip.mjs    Paperclip REST bridge (preview, mirror, typed errors)
 │  ├─ keyintake.mjs    find key/endpoints/models/params in any pasted text
 │  ├─ snippets.mjs     parse + replay a pasted chat-completions request
 │  ├─ store.mjs        file-backed runs, events, artifacts, knowledge
-│  ├─ config.mjs       settings precedence + 0600 secret storage
+│  ├─ config.mjs       settings precedence, 0600 storage, background key vault
 │  └─ sim.mjs          deterministic offline NIM simulator
 ├─ web/                dependency-free SPA (ES modules, hash routing)
 │  ├─ app.js  lib.js  styles.css  index.html
 │  └─ views/           dashboard, autopilot, chat, knowledge, models,
 │                      guardrails, studio, companies, settings
 ├─ scripts/seed-demo.mjs
-└─ test/               53 tests: engine, tools, retrieval, company, bridge, credential intake,
-snippet replay, HTTP, UI
+└─ test/               60 tests: engine, tools, retrieval, company, bridge, credential intake,
+snippet replay, key vault, model catalog, HTTP, UI
 ```
 
 Design choices worth knowing:
@@ -323,7 +380,7 @@ Design choices worth knowing:
 ## Tests
 
 ```bash
-npm test                                      # 53 tests, no network, no key
+npm test                                      # 60 tests, no network, no key
 npm i --no-save jsdom && npm test             # + UI render smoke test
 ```
 
@@ -335,7 +392,9 @@ per-agent budgets, the Paperclip bridge (dry run, mirror, error hints), credenti
 intake (snippet/bare-key/env-line parsing, verification that separates a bad key
 from an unreachable host, and never echoing the secret), snippet replay (python,
 curl, node and JSON bodies; the exact wire payload including `reasoning_effort`
-and vision parts; blocked-egress hints), every HTTP route, and that each view —
+and vision parts; blocked-egress hints), the key vault (masking, precedence,
+rotation, 0600 storage, no secret in any response), the model catalog (families,
+search, source labels, setting a default), every HTTP route, and that each view —
 including every Company OS tab — renders against the live API.
 
 ---

@@ -90,6 +90,17 @@ test("every view renders against the live API without throwing", { skip: !JSDOM 
   };
 
   const host = dom.window.document.getElementById("view");
+  // Settings carries the model catalog and the key database, so check them
+  // before the generic loop re-renders everything.
+  host.innerHTML = "";
+  const settingsCleanup = await views.settings.render(host, ctx, []);
+  assert.ok(host.querySelectorAll("#model-rows tr").length > 50, "the full model catalog should be listed");
+  assert.ok(host.querySelector("#models-card"), "models section missing");
+  assert.ok(host.querySelector("#keys-card"), "key database section missing");
+  assert.match(host.textContent, /Model catalog/);
+  assert.match(host.textContent, /API key database/);
+  if (typeof settingsCleanup === "function") settingsCleanup();
+
   for (const [name, view] of Object.entries(views)) {
     host.innerHTML = "";
     const cleanup = await view.render(host, ctx, []);

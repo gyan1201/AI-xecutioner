@@ -1,8 +1,9 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
-import { ROOT } from "./config.mjs";
+import { ROOT, activateVaultKey, addVaultKey, readVault, removeVaultKey, vaultSummary, writeVault } from "./config.mjs";
 import { maskKey, parseCredentialText, pickDefaultModel, verifyCredential } from "./keyintake.mjs";
 import { parseSnippet, runSnippet } from "./snippets.mjs";
+import { MODEL_CATALOG, describeModel, groupCatalog } from "./catalog.mjs";
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -164,6 +165,141 @@ export function createApp(runtime, { broadcast = () => {} } = {}) {
     };
   });
 
+  /* --------------------------------- catalog -------------------------------- */
+
+  /**
+   * The full model surface: live discovery, pasted ids and the curated
+   * build.nvidia.com catalog, grouped by family with their source labelled.
+   */
+  route("GET", "/api/models/catalog", async ({ query }) => {
+    const discovered = await loadModels({ force: query.get("refresh") === "1" });
+    const search = String(query.get("q") ?? "").trim().toLowerCase();
+    const byId = new Map();
+    for (const model of discovered.models) {
+      byId.set(model.id, {
+        ...model,
+        source: model.pasted ? "pasted" : discovered.simulated ? "simulated" : "live",
+      });
+    }
+    for (const preset of MODEL_CATALOG) {
+      if (byId.has(preset.id)) continue;
+      byId.set(preset.id, { ...describeModel(preset.id), source: "catalog" });
+    }
+    let models = [...byId.values()];
+    if (search) {
+      models = models.filter(
+        (model) =>
+          model.id.toLowerCase().includes(search) ||
+          String(model.label).toLowerCase().includes(search) ||
+          (model.capabilities ?? []).some((capability) => capability.includes(search)),
+      );
+    }
+    const vault = vaultSummary();
+    return {
+      total: byId.size,
+      shown: models.length,
+      counts: {
+        live: [...byId.values()].filter((model) => model.source === "live").length,
+        catalog: [...byId.values()].filter((model) => model.source === "catalog").length,
+        simulated: [...byId.values()].filter((model) => model.source === "simulated").length,
+        pasted: [...byId.values()].filter((model) => model.source === "pasted").length,
+      },
+      groups: groupCatalog(models),
+      defaultModel: runtime.defaultChatModel?.() ?? null,
+      keys: { count: vault.count, verified: vault.verified, activeHint: vault.activeHint },
+      simulation: config.load().simulation,
+    };
+  });
+
+  /* ---------------------------------- keys ---------------------------------- */
+
+  route("GET", "/api/keys", async () => {
+    const vault = vaultSummary();
+    return {
+      ...vault,
+      activeSource: config.load().keySource,
+      hasApiKey: config.load().hasApiKey,
+      needsApiKey: !config.load().hasApiKey,
+    };
+  });
+
+  /**
+   * Store a credential in the vault. Accepts the same free text as
+   * /api/settings/key (bare key, env line, whole snippet) plus an optional label.
+   */
+  route("POST", "/api/keys", async ({ body }) => {
+    const text =
+      typeof body.text === "string"
+        ? body.text
+        : typeof body.apiKey === "string"
+          ? body.apiKey
+          : "";
+    const parsed = parseCredentialText(text);
+    const apiKey = (typeof body.apiKey === "string" ? body.apiKey.trim() : "") || parsed.apiKey;
+    if (!apiKey) {
+      throw Object.assign(new Error("No NVIDIA API key found in that text."), {
+        status: 422,
+        hint: parsed.warnings[0] ?? "Look for an `nvapi-…` token.",
+      });
+    }
+    const current = config.load();
+    const baseUrl = normalizeEndpoint(body.nimBaseUrl || parsed.nimBaseUrl || current.nimBaseUrl, current.nimBaseUrl);
+    const verification =
+      body.verify === false
+        ? { attempted: false, ok: false, status: 0, reason: "skipped", latencyMs: 0 }
+        : await verifyCredential({ apiKey, baseUrl, timeoutMs: Number(body.timeoutMs) || 12_000 });
+    const record = addVaultKey({
+      apiKey,
+      label: body.label,
+      baseUrl,
+      source: parsed.source === "key" ? "pasted" : "pasted-snippet",
+      verified: verification.ok,
+      verifyReason: verification.reason ?? null,
+      modelCount: verification.modelCount ?? 0,
+    });
+    // A verified key in the vault is enough to leave simulation, unless the
+    // operator asked to stay there.
+    let live = !config.load().simulation;
+    if (verification.ok && body.staySimulated !== true) {
+      config.write({ simulation: false });
+      await runtime.refreshModels();
+      live = true;
+    }
+    return {
+      key: record,
+      keys: vaultSummary(),
+      verification,
+      notes: [
+        verification.ok
+          ? `Key verified — ${verification.modelCount} models available.`
+          : verification.reason === "unreachable"
+            ? "Key stored, but this host cannot reach NVIDIA yet; simulation stays on."
+            : `Key stored; NVIDIA did not accept it (${verification.reason}).`,
+      ],
+      live,
+      config: config.public(),
+    };
+  });
+
+  route("PATCH", "/api/keys/:id", async ({ params, body }) => {
+    const vault = readVault();
+    const record = vault.keys.find((entry) => entry.id === params.id);
+    if (!record) throw Object.assign(new Error("Key not found"), { status: 404 });
+    if (body.label && typeof body.label === "string") {
+      record.label = body.label.trim().slice(0, 80);
+      const next = { ...vault, keys: vault.keys.map((entry) => (entry.id === record.id ? record : entry)) };
+      writeVault(next);
+    }
+    if (body.active === true) activateVaultKey(params.id);
+    return { keys: vaultSummary(), activeSource: config.load().keySource };
+  });
+
+  route("DELETE", "/api/keys/:id", async ({ params }) => {
+    const result = removeVaultKey(params.id);
+    if (!result) throw Object.assign(new Error("Key not found"), { status: 404 });
+    return { ...result, keys: vaultSummary(), hasApiKey: config.load().hasApiKey };
+  });
+
   route("GET", "/api/settings", async () => {
     const runtimeSettings = config.read();
     return {
@@ -253,6 +389,17 @@ export function createApp(runtime, { broadcast = () => {} } = {}) {
       pastedModels,
       keyMeta,
     });
+    // Keep every credential we have seen in the background vault, so removing
+    // the active key (or restarting) never loses it.
+    const storedKey = addVaultKey({
+      apiKey,
+      label: body.label || (parsed.models[0] ? `${parsed.models[0].split("/").pop()}` : undefined),
+      baseUrl: nimBaseUrl,
+      source: parsed.source === "key" ? "pasted" : "pasted-snippet",
+      verified: verification.ok,
+      verifyReason: verification.reason ?? null,
+      modelCount: verification.modelCount ?? 0,
+    });
 
     const models = await runtime.refreshModels();
     const notes = [];
@@ -282,6 +429,8 @@ export function createApp(runtime, { broadcast = () => {} } = {}) {
       },
       verification,
       notes,
+      key: storedKey,
+      keys: vaultSummary(),
       modelCount: models.models.length,
       config: config.public(),
     };
@@ -309,9 +458,11 @@ export function createApp(runtime, { broadcast = () => {} } = {}) {
         ? { ...previous, source: "manual", addedAt: new Date().toISOString(), verified: false, keyHint: maskKey(patch.apiKey), verifyReason: "unverified" }
         : {};
       if (!patch.apiKey) {
-        // The pasted models and request defaults came in with that credential.
+        // Fall back to the vault (if it holds a key) instead of forcing simulation,
+        // and drop the models/defaults that arrived with this credential.
         patch.pastedModels = [];
         patch.defaults = {};
+        if (vaultSummary().count > 0) patch.simulation = false;
       }
     }
     if (typeof body.simulation === "boolean") patch.simulation = body.simulation;
@@ -324,6 +475,17 @@ export function createApp(runtime, { broadcast = () => {} } = {}) {
       };
     }
     if (body.roleOverrides && typeof body.roleOverrides === "object") patch.roleOverrides = body.roleOverrides;
+    if (body.defaults && typeof body.defaults === "object") {
+      const current = config.read().defaults ?? {};
+      const next = { ...current };
+      if (typeof body.defaults.chatModel === "string") {
+        const model = body.defaults.chatModel.trim();
+        if (model) next.chatModel = model;
+        else delete next.chatModel;
+      }
+      if (body.defaults.params && typeof body.defaults.params === "object") next.params = body.defaults.params;
+      patch.defaults = next;
+    }
     if (body.paperclip && typeof body.paperclip === "object") {
       const current = config.read().paperclip ?? {};
       const next = { ...current };

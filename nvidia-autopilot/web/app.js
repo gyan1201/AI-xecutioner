@@ -82,6 +82,92 @@ function renderChrome() {
   keyBtn.dataset.keyed = config?.hasApiKey ? "1" : "0";
 }
 
+const KEY_PROMPT_FLAG = "nvidia-autopilot.key-prompt-dismissed";
+
+/**
+ * If the key database is empty, ask once — the app runs in simulation until a
+ * key exists, and saying so beats silently simulating for hours.
+ */
+function maybeAskForKey() {
+  const config = state.status?.config;
+  if (!config) return;
+  if (config.hasApiKey || config.keys?.count > 0) return;
+  if (localStorage.getItem(KEY_PROMPT_FLAG) === "1") return;
+  if (document.getElementById("key-veil")) return;
+  if (location.hash.includes("/settings")) return;
+
+  const veil = document.createElement("div");
+  veil.className = "modal-veil";
+  veil.id = "key-veil";
+  veil.innerHTML = `
+    <div class="modal modal-sm card">
+      <div class="card-head">
+        <span class="card-title">No NVIDIA API key in the database</span>
+        <span class="badge badge-amber">simulation</span>
+      </div>
+      <div class="modal-body stack">
+        <p class="small muted">
+          Everything runs without a key, but inference is simulated. Paste your key — or the whole python /
+          curl snippet that contains it — and it is stored in <code>data/keys.json</code> (mode 0600) and used in
+          the background from now on.
+        </p>
+        <div class="field">
+          <label for="key-prompt-text">Key, env line, or request snippet</label>
+          <textarea id="key-prompt-text" rows="5" spellcheck="false" placeholder="nvapi-…&#10;&#10;— or —&#10;export NVIDIA_API_KEY=nvapi-…&#10;&#10;— or the whole snippet —"></textarea>
+        </div>
+        <div id="key-prompt-result"></div>
+        <div class="row-wrap">
+          <button class="btn btn-primary" id="key-prompt-save">Store &amp; connect</button>
+          <button class="btn btn-ghost" id="key-prompt-settings">Open settings</button>
+          <button class="btn btn-ghost btn-sm" id="key-prompt-later">Not now</button>
+        </div>
+        <p class="tiny faint">Dismissing asks again next launch. The key is never sent to the browser again — only <code>••••1234</code>.</p>
+      </div>
+    </div>`;
+  document.body.appendChild(veil);
+
+  const close = (remember) => {
+    if (remember) localStorage.setItem(KEY_PROMPT_FLAG, "1");
+    veil.remove();
+  };
+
+  veil.querySelector("#key-prompt-later").addEventListener("click", () => close(true));
+  veil.querySelector("#key-prompt-settings").addEventListener("click", () => {
+    close(false);
+    navigate("/settings");
+  });
+  veil.querySelector("#key-prompt-save").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const text = veil.querySelector("#key-prompt-text").value.trim();
+    const result = veil.querySelector("#key-prompt-result");
+    if (!text) {
+      result.innerHTML = `<div class="banner"><span>◐</span><div>Paste a key first.</div></div>`;
+      return;
+    }
+    button.disabled = true;
+    button.innerHTML = `<span class="spinner"></span> storing`;
+    try {
+      const stored = await api.post("/api/keys", { text, timeoutMs: 12_000 });
+      const verification = stored.verification ?? {};
+      if (verification.ok) {
+        result.innerHTML = `<div class="banner green"><span>✓</span><div><strong>Stored and verified.</strong> ${verification.modelCount} models available — switching to live inference.</div></div>`;
+        setTimeout(() => location.reload(), 900);
+      } else if (verification.reason === "unreachable") {
+        result.innerHTML = `<div class="banner"><span>◐</span><div><strong>Stored.</strong> This host cannot reach NVIDIA, so simulation stays on until it can.</div></div>`;
+        await refreshStatus();
+        setTimeout(() => close(false), 1400);
+      } else {
+        result.innerHTML = `<div class="banner red"><span>✕</span><div><strong>Stored, but not accepted.</strong> ${verification.hint ?? verification.reason ?? ""}</div></div>`;
+      }
+    } catch (error) {
+      result.innerHTML = `<div class="banner red"><span>✕</span><div>${esc(error.message)}${error.hint ? ` ${esc(error.hint)}` : ""}</div></div>`;
+    } finally {
+      button.disabled = false;
+      button.textContent = "Store & connect";
+    }
+  });
+}
+
 export async function refreshStatus() {
   try {
     state.status = await api.get("/api/status");
@@ -142,7 +228,7 @@ async function render() {
 
 function boot() {
   renderNav();
-  refreshStatus();
+  refreshStatus().then(() => maybeAskForKey());
   render();
   statusTimer = setInterval(refreshStatus, 20_000);
   window.addEventListener("hashchange", render);

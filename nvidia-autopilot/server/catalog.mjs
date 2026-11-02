@@ -143,6 +143,8 @@ export const CAPABILITY_LABELS = {
   safety: "Safety",
   image: "Image generation",
   long_context: "Long context",
+  audio: "Audio / speech",
+  biology: "Biology / chemistry",
 };
 
 /** Curated presets — used for offline labelling and as role fallbacks. */
@@ -188,6 +190,99 @@ export const MODEL_PRESETS = [
   { id: "black-forest-labs/flux.2-klein", label: "FLUX.2 Klein", publisher: "black-forest-labs", capabilities: ["image"] },
 ];
 
+
+/**
+ * The rest of the hosted catalog. `build.nvidia.com/models` lists ~100 NIMs;
+ * these entries cover the families this app can drive (chat, reasoning, vision,
+ * embeddings, rerank, safety, image, audio, biology). Live discovery still wins —
+ * anything returned by `/v1/models` is labelled `live`, and anything here that
+ * the account cannot see is labelled `catalog`.
+ */
+export const EXTRA_CATALOG = [
+  { "id": "meta/llama-3.1-8b-instruct", "label": "Llama 3.1 8B Instruct", "publisher": "meta", "capabilities": ["chat", "tool_use"], "contextWindow": 131072},
+  { "id": "meta/llama-3.1-70b-instruct", "label": "Llama 3.1 70B Instruct", "publisher": "meta", "capabilities": ["chat", "tool_use"], "contextWindow": 131072},
+  { "id": "meta/llama-3.1-405b-instruct", "label": "Llama 3.1 405B Instruct", "publisher": "meta", "capabilities": ["chat", "tool_use", "long_context"], "contextWindow": 131072},
+  { "id": "meta/llama-3.2-1b-instruct", "label": "Llama 3.2 1B Instruct", "publisher": "meta", "capabilities": ["chat"], "contextWindow": 131072},
+  { "id": "meta/llama-3.2-3b-instruct", "label": "Llama 3.2 3B Instruct", "publisher": "meta", "capabilities": ["chat"], "contextWindow": 131072},
+  { "id": "meta/llama-3.2-11b-vision-instruct", "label": "Llama 3.2 11B Vision", "publisher": "meta", "capabilities": ["chat", "vision"], "contextWindow": 131072},
+  { "id": "meta/llama-4-maverick-17b-128e-instruct", "label": "Llama 4 Maverick 17B", "publisher": "meta", "capabilities": ["chat", "vision", "tool_use", "long_context"], "contextWindow": 1000000},
+  { "id": "meta/llama-4-scout-17b-16e-instruct", "label": "Llama 4 Scout 17B", "publisher": "meta", "capabilities": ["chat", "vision", "tool_use", "long_context"], "contextWindow": 1000000},
+  { "id": "meta/codellama-70b", "label": "CodeLlama 70B", "publisher": "meta", "capabilities": ["chat", "code"], "contextWindow": 16384},
+  { "id": "nvidia/llama-3.1-nemotron-70b-instruct", "label": "Llama 3.1 Nemotron 70B", "publisher": "nvidia", "capabilities": ["chat", "tool_use"], "contextWindow": 131072},
+  { "id": "nvidia/llama-3.3-nemotron-super-49b-v1", "label": "Llama 3.3 Nemotron Super 49B v1", "publisher": "nvidia", "capabilities": ["chat", "reasoning", "tool_use"], "contextWindow": 131072},
+  { "id": "nvidia/nvidia-nemotron-nano-9b-v2", "label": "Nemotron Nano 9B v2", "publisher": "nvidia", "capabilities": ["chat", "reasoning"], "contextWindow": 131072},
+  { "id": "nvidia/nemotron-nano-12b-v2-vl", "label": "Nemotron Nano 12B v2 VL", "publisher": "nvidia", "capabilities": ["chat", "vision", "reasoning"], "contextWindow": 131072},
+  { "id": "nvidia/nemotron-mini-4b-instruct", "label": "Nemotron Mini 4B", "publisher": "nvidia", "capabilities": ["chat"], "contextWindow": 4096},
+  { "id": "nvidia/mistral-nemo-minitron-8b-8k-instruct", "label": "Mistral NeMo Minitron 8B", "publisher": "nvidia", "capabilities": ["chat"], "contextWindow": 8192},
+  { "id": "nvidia/nemotron-4-340b-instruct", "label": "Nemotron-4 340B Instruct", "publisher": "nvidia", "capabilities": ["chat", "tool_use"], "contextWindow": 4096},
+  { "id": "nvidia/nemotron-4-340b-reward", "label": "Nemotron-4 340B Reward", "publisher": "nvidia", "capabilities": ["chat"], "contextWindow": 4096},
+  { "id": "mistralai/mistral-large-2-instruct", "label": "Mistral Large 2", "publisher": "mistralai", "capabilities": ["chat", "tool_use"], "contextWindow": 131072},
+  { "id": "mistralai/mistral-small-3.1-24b-instruct-2503", "label": "Mistral Small 3.1 24B", "publisher": "mistralai", "capabilities": ["chat", "vision", "tool_use"], "contextWindow": 131072},
+  { "id": "mistralai/mixtral-8x7b-instruct", "label": "Mixtral 8x7B", "publisher": "mistralai", "capabilities": ["chat"], "contextWindow": 32768},
+  { "id": "mistralai/mistral-7b-instruct-v0.3", "label": "Mistral 7B Instruct v0.3", "publisher": "mistralai", "capabilities": ["chat"], "contextWindow": 32768},
+  { "id": "mistralai/codestral-22b-instruct-v0.1", "label": "Codestral 22B", "publisher": "mistralai", "capabilities": ["chat", "code"], "contextWindow": 32768},
+  { "id": "mistralai/mamba-codestral-7b-v0.1", "label": "Mamba Codestral 7B", "publisher": "mistralai", "capabilities": ["chat", "code"], "contextWindow": 32768},
+  { "id": "deepseek-ai/deepseek-r1", "label": "DeepSeek R1", "publisher": "deepseek-ai", "capabilities": ["chat", "reasoning"], "contextWindow": 131072},
+  { "id": "deepseek-ai/deepseek-r1-distill-qwen-32b", "label": "DeepSeek R1 Distill Qwen 32B", "publisher": "deepseek-ai", "capabilities": ["chat", "reasoning"], "contextWindow": 131072},
+  { "id": "deepseek-ai/deepseek-r1-distill-llama-8b", "label": "DeepSeek R1 Distill Llama 8B", "publisher": "deepseek-ai", "capabilities": ["chat", "reasoning"], "contextWindow": 131072},
+  { "id": "deepseek-ai/deepseek-coder-6.7b-instruct", "label": "DeepSeek Coder 6.7B", "publisher": "deepseek-ai", "capabilities": ["chat", "code"], "contextWindow": 16384},
+  { "id": "qwen/qwen2.5-7b-instruct", "label": "Qwen2.5 7B", "publisher": "qwen", "capabilities": ["chat", "tool_use"], "contextWindow": 32768},
+  { "id": "qwen/qwen2.5-coder-7b-instruct", "label": "Qwen2.5 Coder 7B", "publisher": "qwen", "capabilities": ["chat", "code"], "contextWindow": 32768},
+  { "id": "qwen/qwen3-235b-a22b", "label": "Qwen3 235B A22B", "publisher": "qwen", "capabilities": ["chat", "reasoning", "tool_use", "long_context"], "contextWindow": 131072},
+  { "id": "qwen/qwen2-vl-7b-instruct", "label": "Qwen2 VL 7B", "publisher": "qwen", "capabilities": ["chat", "vision"], "contextWindow": 32768},
+  { "id": "qwen/qwen2.5-vl-7b-instruct", "label": "Qwen2.5 VL 7B", "publisher": "qwen", "capabilities": ["chat", "vision"], "contextWindow": 32768},
+  { "id": "qwen/qwen-image", "label": "Qwen Image", "publisher": "qwen", "capabilities": ["image"]},
+  { "id": "google/gemma-2-27b-it", "label": "Gemma 2 27B", "publisher": "google", "capabilities": ["chat"], "contextWindow": 8192},
+  { "id": "google/gemma-2-9b-it", "label": "Gemma 2 9B", "publisher": "google", "capabilities": ["chat"], "contextWindow": 8192},
+  { "id": "google/gemma-2b", "label": "Gemma 2B", "publisher": "google", "capabilities": ["chat"], "contextWindow": 8192},
+  { "id": "google/codegemma-7b", "label": "CodeGemma 7B", "publisher": "google", "capabilities": ["chat", "code"], "contextWindow": 8192},
+  { "id": "google/recurrentgemma-2b", "label": "RecurrentGemma 2B", "publisher": "google", "capabilities": ["chat"], "contextWindow": 8192},
+  { "id": "google/shieldgemma-9b", "label": "ShieldGemma 9B", "publisher": "google", "capabilities": ["safety"], "contextWindow": 8192},
+  { "id": "google/paligemma", "label": "PaliGemma", "publisher": "google", "capabilities": ["vision"], "contextWindow": 8192},
+  { "id": "google/deplot", "label": "DePlot", "publisher": "google", "capabilities": ["vision"], "contextWindow": 4096},
+  { "id": "microsoft/phi-3-medium-128k-instruct", "label": "Phi-3 Medium 128K", "publisher": "microsoft", "capabilities": ["chat"], "contextWindow": 131072},
+  { "id": "microsoft/phi-3-mini-128k-instruct", "label": "Phi-3 Mini 128K", "publisher": "microsoft", "capabilities": ["chat"], "contextWindow": 131072},
+  { "id": "microsoft/phi-3.5-vision-instruct", "label": "Phi-3.5 Vision", "publisher": "microsoft", "capabilities": ["chat", "vision"], "contextWindow": 131072},
+  { "id": "microsoft/phi-4-multimodal-instruct", "label": "Phi-4 Multimodal", "publisher": "microsoft", "capabilities": ["chat", "vision"], "contextWindow": 131072},
+  { "id": "moonshotai/kimi-k2-instruct-0905", "label": "Kimi K2 Instruct 0905", "publisher": "moonshotai", "capabilities": ["chat", "tool_use", "long_context"], "contextWindow": 262144},
+  { "id": "minimaxai/minimax-m2", "label": "MiniMax M2", "publisher": "minimaxai", "capabilities": ["chat", "reasoning", "tool_use"], "contextWindow": 204800},
+  { "id": "minimaxai/minimax-m1-40k", "label": "MiniMax M1 40K", "publisher": "minimaxai", "capabilities": ["chat", "reasoning"], "contextWindow": 40960},
+  { "id": "ibm-granite/granite-3.3-8b-instruct", "label": "Granite 3.3 8B", "publisher": "ibm-granite", "capabilities": ["chat"], "contextWindow": 131072},
+  { "id": "ibm-granite/granite-34b-code-instruct", "label": "Granite 34B Code", "publisher": "ibm-granite", "capabilities": ["chat", "code"], "contextWindow": 131072},
+  { "id": "ibm-granite/granite-vision-3.2-2b", "label": "Granite Vision 3.2 2B", "publisher": "ibm-granite", "capabilities": ["chat", "vision"], "contextWindow": 131072},
+  { "id": "bytedance/seed-oss-36b-instruct", "label": "Seed OSS 36B", "publisher": "bytedance", "capabilities": ["chat", "reasoning"], "contextWindow": 262144},
+  { "id": "stepfun-ai/step-3.5-flash", "label": "Step 3.5 Flash", "publisher": "stepfun-ai", "capabilities": ["chat", "reasoning"], "contextWindow": 131072},
+  { "id": "poolside/laguna-xs-2", "label": "Laguna XS.2", "publisher": "poolside", "capabilities": ["chat", "code"], "contextWindow": 131072},
+  { "id": "sarvamai/sarvam-m", "label": "Sarvam M", "publisher": "sarvamai", "capabilities": ["chat"], "contextWindow": 32768},
+  { "id": "stockmark/stockmark-2-100b-instruct", "label": "Stockmark 2 100B", "publisher": "stockmark", "capabilities": ["chat"], "contextWindow": 32768},
+  { "id": "upstage/solar-10.7b-instruct", "label": "SOLAR 10.7B", "publisher": "upstage", "capabilities": ["chat"], "contextWindow": 4096},
+  { "id": "writer/palmyra-med-70b", "label": "Palmyra Med 70B", "publisher": "writer", "capabilities": ["chat"], "contextWindow": 32768},
+  { "id": "adept/fuyu-8b", "label": "Fuyu 8B", "publisher": "adept", "capabilities": ["vision"], "contextWindow": 4096},
+  { "id": "01-ai/yi-large", "label": "Yi Large", "publisher": "01-ai", "capabilities": ["chat"], "contextWindow": 32768},
+  { "id": "nvidia/nv-embedqa-mistral-7b-v2", "label": "NV EmbedQA Mistral 7B v2", "publisher": "nvidia", "capabilities": ["embedding"], "contextWindow": 4096},
+  { "id": "nvidia/llama-3.2-nemoretriever-300m-embed-v1", "label": "NeMo Retriever Embed 300M", "publisher": "nvidia", "capabilities": ["embedding"], "contextWindow": 8192},
+  { "id": "nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1", "label": "NeMo Retriever VLM Embed 1B", "publisher": "nvidia", "capabilities": ["embedding", "vision"], "contextWindow": 8192},
+  { "id": "snowflake/arctic-embed-l", "label": "Arctic Embed L", "publisher": "snowflake", "capabilities": ["embedding"], "contextWindow": 512},
+  { "id": "nvidia/nvclip", "label": "NVCLIP", "publisher": "nvidia", "capabilities": ["embedding", "vision"], "contextWindow": 77},
+  { "id": "nvidia/llama-nemotron-rerank-vl-1b-v2", "label": "Nemotron Rerank VL 1B v2", "publisher": "nvidia", "capabilities": ["rerank", "vision"], "contextWindow": 8192},
+  { "id": "nvidia/llama-3.1-nemoguard-8b-topic-control", "label": "NeMoGuard Topic Control 8B", "publisher": "nvidia", "capabilities": ["safety"], "contextWindow": 128000},
+  { "id": "nvidia/nemoretriever-parse", "label": "NeMo Retriever Parse", "publisher": "nvidia", "capabilities": ["vision"], "contextWindow": 32768},
+  { "id": "nvidia/nemoretriever-ocr-v1", "label": "NeMo Retriever OCR", "publisher": "nvidia", "capabilities": ["vision"], "contextWindow": 8192},
+  { "id": "nvidia/parakeet-tdt-0.6b-v2", "label": "Parakeet TDT 0.6B v2", "publisher": "nvidia", "capabilities": ["audio"]},
+  { "id": "nvidia/canary-1b", "label": "Canary 1B", "publisher": "nvidia", "capabilities": ["audio"]},
+  { "id": "openai/whisper-large-v3", "label": "Whisper Large v3", "publisher": "openai", "capabilities": ["audio"]},
+  { "id": "nvidia/esm2-650m", "label": "ESM2 650M", "publisher": "nvidia", "capabilities": ["biology"]},
+  { "id": "nvidia/esmfold", "label": "ESMFold", "publisher": "nvidia", "capabilities": ["biology"]},
+  { "id": "nvidia/molmim", "label": "MolMIM", "publisher": "nvidia", "capabilities": ["biology"]},
+  { "id": "black-forest-labs/flux.1-schnell", "label": "FLUX.1 Schnell", "publisher": "black-forest-labs", "capabilities": ["image"]},
+  { "id": "black-forest-labs/flux.1-kontext-dev", "label": "FLUX.1 Kontext Dev", "publisher": "black-forest-labs", "capabilities": ["image"]},
+  { "id": "stabilityai/stable-diffusion-xl", "label": "Stable Diffusion XL", "publisher": "stabilityai", "capabilities": ["image"]},
+  { "id": "nvidia/sana", "label": "SANA", "publisher": "nvidia", "capabilities": ["image"]},
+];
+
+/** Everything this app knows about, curated presets first. */
+export const MODEL_CATALOG = [...MODEL_PRESETS, ...EXTRA_CATALOG];
+
 const PATTERNS = [
   ["embedding", /(^|[\/-])(embed|embedqa|bge-m3|nvclip|arctic-embed)/],
   ["rerank", /(^|[\/-])(rerank|ranking)/],
@@ -215,7 +310,7 @@ export function inferCapabilities(id) {
 }
 
 export function describeModel(id, extra = {}) {
-  const preset = MODEL_PRESETS.find((entry) => entry.id === id);
+  const preset = MODEL_CATALOG.find((entry) => entry.id === id);
   const [publisher] = String(id).split("/");
   return {
     id,
@@ -361,3 +456,49 @@ export const AGENT_TOOLS = [
 ];
 
 export const TOOL_NAMES = AGENT_TOOLS.map((tool) => tool.function.name);
+
+/** Primary capability order used by the Settings → Models browser. */
+export const CAPABILITY_ORDER = [
+  "chat",
+  "reasoning",
+  "tool_use",
+  "vision",
+  "code",
+  "long_context",
+  "embedding",
+  "rerank",
+  "safety",
+  "image",
+  "audio",
+  "biology",
+];
+
+/**
+ * Specific families win over the generic ones so a vision or code model shows up
+ * under Vision/Code rather than disappearing into the chat bucket. Everything
+ * else (chat, reasoning, tool use, long context) is grouped as Chat.
+ */
+export const FAMILY_PRIORITY = ["embedding", "rerank", "safety", "image", "audio", "biology", "vision", "code"];
+
+export function primaryFamily(model) {
+  const capabilities = model.capabilities ?? [];
+  return FAMILY_PRIORITY.find((family) => capabilities.includes(family)) ?? "chat";
+}
+
+/**
+ * Group models once each by their primary family so the catalog reads as
+ * families instead of an alphabetical wall of ids.
+ */
+export function groupCatalog(models) {
+  const groups = new Map();
+  for (const model of models) {
+    const primary = primaryFamily(model);
+    if (!groups.has(primary)) groups.set(primary, []);
+    groups.get(primary).push(model);
+  }
+  return CAPABILITY_ORDER.filter((capability) => groups.has(capability)).map((capability) => ({
+    capability,
+    label: CAPABILITY_LABELS[capability] ?? capability,
+    models: groups.get(capability).sort((a, b) => String(a.id).localeCompare(String(b.id))),
+  }));
+}

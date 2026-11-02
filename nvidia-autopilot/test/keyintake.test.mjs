@@ -268,7 +268,14 @@ test("an explicit mode overrides verification, and bad input is a 422", async ()
   assert.equal(verify.body.live, false);
 });
 
-test("removing the key clears the models it brought in", async () => {
+test("removing the active key clears the models it brought in", async () => {
+  // Every pasted key is also kept in the background vault; empty it so this
+  // test is about removal, not about the vault fallback.
+  const keys = await json("/api/keys");
+  for (const key of keys.body.keys) {
+    await json(`/api/keys/${key.id}`, { method: "DELETE" });
+  }
+
   const cleared = await json("/api/settings", { method: "PUT", body: { apiKey: "", simulation: true } });
   assert.equal(cleared.status, 200);
   assert.equal(cleared.body.hasApiKey, false);
