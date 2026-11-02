@@ -395,6 +395,12 @@ test("static UI is served and unknown API routes return JSON 404", async () => {
   assert.match(html, /\[hidden\]\s*\{\s*display:\s*none\s*!important/, "critical CSS must be inlined in the document");
   assert.match(index.headers.get("cache-control") ?? "", /no-store/, "the unversioned HTML must not be cached");
 
+  // The hash must cover every served file, not just the entry points: a stale
+  // views/*.js behind a fresh app.js is the same class of bug as stale CSS.
+  const viewModule = await fetch(`${base}/views/models.js?v=${version}`);
+  assert.equal(viewModule.status, 200);
+  assert.match(await viewModule.text(), /provider-setup\.js\?v=[a-f0-9]{6,}/);
+
   const entry = await fetch(`${base}/app.js?v=${version}`);
   const entrySource = await entry.text();
   assert.match(entrySource, /views\/dashboard\.js\?v=[a-f0-9]{6,}/, "module specifiers must be versioned too");

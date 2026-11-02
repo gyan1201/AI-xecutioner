@@ -9,7 +9,8 @@
 import { MODEL_CATALOG, catalogSummary, mergeLive } from "./nim/catalog.mjs";
 import { createNimClient } from "./nim/client.mjs";
 import { currentUsageContext } from "./nim/usage.mjs";
-import { runtimeConfig } from "./config.mjs";
+import { loadVault, runtimeConfig } from "./config.mjs";
+import { resolveProviders } from "./nim/providers.mjs";
 import { createEngine } from "./domain/engine.mjs";
 import { createService } from "./domain/service.mjs";
 import { createEventBus, createStore } from "./store.mjs";
@@ -20,6 +21,9 @@ export function createRuntime({ logger = console } = {}) {
 
   const nim = createNimClient({
     getConfig: runtimeConfig,
+    // Provider-scoped credentials: a model added from a Groq/OpenAI snippet is
+    // called at *its* base URL, while everything else keeps using NIM.
+    getProviders: () => resolveProviders({ vault: loadVault() }),
     logger,
     onUsage: (event) => {
       const context = currentUsageContext();

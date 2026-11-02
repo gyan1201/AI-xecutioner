@@ -69,6 +69,23 @@ Resolution order, first hit wins:
 
 `server/nim/intake.mjs` accepts a bare key, an env line (`NVIDIA_API_KEY=nvapi-…`), an `Authorization:` header or a whole curl/SDK snippet, and extracts the `nvapi-…` token. New keys are verified with `GET /models` before being stored, and the UI only ever sees a mask (`nvapi-…3f9c`).
 
+## Providers
+
+`server/nim/providers.mjs` is the "one key, every model" layer. A provider is a base URL plus a key shape; the registry ships NVIDIA NIM, OpenAI, Groq, OpenRouter, Together, Mistral, DeepSeek, Fireworks, Perplexity and Anthropic, and any OpenAI-compatible host can be added as a custom endpoint.
+
+Detection reads pasted snippets — Python, cURL, an env line, or a bare key — and returns the provider, base URL, key and model:
+
+| Signal | Example | Strength |
+| --- | --- | --- |
+| base URL host | `base_url="https://integrate.api.nvidia.com/v1"` | conclusive |
+| vendor key prefix | `nvapi-…`, `gsk_…`, `sk-or-v1-…`, `sk-ant-…`, `pplx-…` | conclusive |
+| SDK import | `from groq import Groq` | indicative |
+| plain `sk-…` | OpenAI-style keys are shared by several vendors | ambiguous, ask the user |
+
+`OpenAI(base_url="…/chat/completions")` is collapsed to the provider root, `os.environ["NVIDIA_API_KEY"]` is reported as "nothing to extract, paste the key itself", and an unknown host becomes a custom OpenAI-compatible provider.
+
+Connections live in `data/providers.json` (keys stay in `data/keys.json`). At call time the client resolves a model id to its provider and uses that base URL and key; everything else keeps using the NIM default, so adding a Groq key never repoints NVIDIA inference.
+
 ## Simulation
 
 `sim.mjs` implements every family locally:

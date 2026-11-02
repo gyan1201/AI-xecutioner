@@ -1,5 +1,6 @@
 import { api, debounce, esc, icon, money, num, openDrawer, toast } from "../lib.js";
 import { pageHeader } from "./shared.js";
+import { connectCard, openSetupModal } from "./provider-setup.js";
 
 export const title = "Models";
 
@@ -14,8 +15,10 @@ export async function render(root, ctx) {
   if (query) params.set("q", query);
   if (capability) params.set("capability", capability);
   if (family) params.set("family", family);
-  const data = await api(`/api/models?${params}`);
+  const [data, providerData] = await Promise.all([api(`/api/models?${params}`), api("/api/providers")]);
   ctx.state.models = data.models;
+  ctx.state.providers = providerData.providers;
+  ctx.state.providerCatalog = providerData.available;
 
   root.innerHTML = `
     ${pageHeader({
@@ -23,6 +26,11 @@ export async function render(root, ctx) {
       title: "Models",
       subtitle: `${data.summary.total} models in the catalog · ${data.live ? `synced live from <span class="mono">/v1/models</span> ${data.syncedAt ? new Date(data.syncedAt).toLocaleTimeString() : ""}` : "offline snapshot — refresh to merge the live /v1/models list"}`,
       actions: `<button class="btn ghost" data-action="refresh">${icon("activity", "nav-icon")} Sync live catalog</button>`,
+    })}
+
+    ${connectCard({
+      providers: providerData.providers,
+      nvidia: { configured: data.nvidiaUnlocked, models: data.catalogTotal ?? data.summary.total, live: providerData.config?.mode === "live" },
     })}
 
     ${data.error ? `<div class="card" style="border-color:rgba(227,179,65,.3);margin-bottom:14px"><div class="row" style="gap:8px;color:#f0c94a;font-size:12.5px">${icon("shield", "nav-icon")}<b>Live sync unavailable</b><span style="color:var(--text-2)">${esc(data.error)} — showing the curated snapshot.</span></div></div>` : ""}
@@ -57,7 +65,7 @@ export async function render(root, ctx) {
                 <div class="model-name">${esc(model.name)} ${model.status === "not-in-account" ? `<span class="pill" title="Not returned by /v1/models for this account">hidden</span>` : ""}</div>
                 <div class="model-id">${esc(model.id)}</div>
               </div>
-              <span class="hint">${esc(model.family)}</span>
+              <span class="hint">${esc(model.family)}${model.providerName ? ` <span class="pill" title="${esc(model.baseUrl ?? "")}">${esc(model.providerName)}</span>` : ""}</span>
               <div class="cap-dots">${model.capabilities.map((cap) => `<span class="cap-dot on" title="${esc(cap)}">${esc(CAP_LETTER[cap] ?? "?")}</span>`).join("")}</div>
               <span class="mono hint">${model.contextK ? `${model.contextK}k` : "—"}</span>
               <span class="mono hint" style="text-align:right">${model.rate?.in != null ? `$${model.rate.in}/$${model.rate.out ?? 0}` : "—"}</span>
@@ -92,6 +100,17 @@ export async function render(root, ctx) {
   root.querySelector("#model-search")?.addEventListener("input", debounce((event) => update({ q: event.target.value }), 320));
   root.querySelector("#family-filter")?.addEventListener("change", (event) => update({ family: event.target.value }));
   root.querySelectorAll("[data-cap]").forEach((chip) => chip.addEventListener("click", () => update({ capability: chip.dataset.cap })));
+
+  root.querySelector('[data-action="open-setup"]')?.addEventListener("click", () =>
+    openSetupModal({
+      available: ctx.state.providerCatalog ?? [],
+      providers: ctx.state.providers ?? [],
+      onChanged: async () => {
+        await render(root, ctx);
+        toast("Configuration saved — models updated", "ok");
+      },
+    }),
+  );
 
   root.querySelector('[data-action="refresh"]')?.addEventListener("click", async (event) => {
     const button = event.currentTarget;
@@ -130,16 +149,31 @@ function showModel(ctx, modelId, root) {
           <div class="kv"><span class="k">Context</span><span class="v">${model.contextK ? `${model.contextK}k tokens` : "—"}</span></div>
           <div class="kv"><span class="k">Rate (in/out)</span><span class="v mono">$${model.rate?.in ?? 0} / $${model.rate?.out ?? 0} per 1M</span></div>
           <div class="kv"><span class="k">Vendor</span><span class="v">${esc(model.vendor)}</span></div>
+          <div class="kv"><span class="k">Provider</span><span class="v">${esc(model.providerName ?? "NVIDIA NIM (default)")}</span></div>
           <div class="kv"><span class="k">Source</span><span class="v">${esc(model.source)}</span></div>
+          ${model.baseUrl ? `<div class="kv"><span class="k">Base URL</span><span class="v mono" style="font-size:11px;word-break:break-all">${esc(model.baseUrl)}</span></div>` : ""}
         </div>
-        <div class="row" style="gap:7px">
+        <div class="row" style="gap:7px;flex-wrap:wrap">
           <button class="btn primary sm" data-probe="${esc(model.id)}">Probe with a real call</button>
           <a class="btn sm ghost" href="#/studio?model=${encodeURIComponent(model.id)}">Open in studio →</a>
+          <button class="btn sm ghost" data-add-key="${esc(model.providerId ?? "nvidia")}">${icon("terminal", "nav-icon")} Add a key for ${esc(model.providerName ?? "NVIDIA")}</button>
         </div>
         <div id="probe-result"></div>
       </div>
     `,
   });
+  document.querySelector("[data-add-key]")?.addEventListener("click", (event) => {
+    openSetupModal({
+      available: ctx.state.providerCatalog ?? [],
+      providers: ctx.state.providers ?? [],
+      onChanged: async () => {
+        if (root) await render(root, ctx);
+        toast("Configuration saved", "ok");
+      },
+    });
+    event.currentTarget.blur();
+  });
+
   document.querySelector("[data-probe]")?.addEventListener("click", async (event) => {
     const button = event.currentTarget;
     button.disabled = true;

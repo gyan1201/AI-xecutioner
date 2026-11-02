@@ -1,10 +1,15 @@
 import { api, copy, esc, icon, money, num, toast } from "../lib.js";
 import { pageHeader } from "./shared.js";
+import { setupPanel, wireSetup } from "./provider-setup.js";
 
 export const title = "Settings";
 
 export async function render(root, ctx) {
-  const [settingsData, config] = await Promise.all([api("/api/settings"), Promise.resolve(ctx.state.bootstrap?.config)]);
+  const [settingsData, config, providerData] = await Promise.all([
+    api("/api/settings"),
+    Promise.resolve(ctx.state.bootstrap?.config),
+    api("/api/providers"),
+  ]);
   const company = ctx.company;
   const models = ctx.state.models ?? [];
   const routing = company.settings.defaultModels ?? {};
@@ -50,6 +55,17 @@ export async function render(root, ctx) {
             <button class="btn sm ghost" data-action="verify">${icon("shield", "nav-icon")} Verify key</button>
           </div>
           <div id="verify-result"></div>
+        </div>
+
+        <div class="card">
+          <div class="row-between" style="margin-bottom:4px">
+            <div class="card-title" style="margin:0">Quick Setup via Code Snippet</div>
+            <span class="pill ${providerData.providers.length ? "green" : "amber"}"><span class="dot"></span>${providerData.providers.length ? `${providerData.providers.length} connected` : "not configured"}</span>
+          </div>
+          <p class="hint" style="margin-bottom:11px">Paste the Python or cURL snippet from NVIDIA NIM, OpenAI or Groq. The provider is detected, the key extracted, the model added and everything configured — no field-by-field setup.</p>
+          <div id="provider-setup">
+            ${setupPanel({ available: providerData.available, providers: providerData.providers })}
+          </div>
         </div>
 
         <div class="card">
@@ -239,6 +255,14 @@ export async function render(root, ctx) {
       render(root, ctx);
     }),
   );
+
+  wireSetup(root.querySelector("#provider-setup"), {
+    available: providerData.available,
+    onChanged: async () => {
+      await render(root, ctx);
+      toast("Provider configured", "ok");
+    },
+  });
 
   root.querySelector('[data-action="save-company"]').addEventListener("click", async () => {
     try {

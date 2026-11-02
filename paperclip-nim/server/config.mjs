@@ -19,6 +19,7 @@ export const paths = {
   companies: join(DATA_DIR, "companies"),
   settings: join(DATA_DIR, "settings.json"),
   keys: join(DATA_DIR, "keys.json"),
+  providers: join(DATA_DIR, "providers.json"),
   skills: join(DATA_DIR, "skills.json"),
   blueprints: join(DATA_DIR, "blueprints.json"),
   web: join(ROOT, "web"),
@@ -104,6 +105,8 @@ export function loadVault() {
     id: entry.id,
     label: entry.label ?? "API key",
     key: entry.key,
+    providerId: entry.providerId ?? null,
+    baseUrl: entry.baseUrl ?? null,
     active: Boolean(entry.active),
     verified: Boolean(entry.verified),
     modelCount: entry.modelCount ?? null,
@@ -122,6 +125,8 @@ export function vaultView() {
   return keys.map((key) => ({
     id: key.id,
     label: key.label,
+    providerId: key.providerId,
+    baseUrl: key.baseUrl,
     hint: maskKey(key.key),
     active: key.active,
     verified: key.verified,
@@ -131,20 +136,32 @@ export function vaultView() {
   }));
 }
 
-export function activeVaultKey() {
-  return loadVault().find((key) => key.active) ?? null;
+/**
+ * The active key for a provider. NVIDIA (and legacy entries saved before
+ * providers existed, which have no `providerId`) are the default, so a Groq or
+ * OpenAI key can never silently take over NIM inference.
+ */
+export function activeVaultKey({ providerId = "nvidia" } = {}) {
+  const keys = loadVault();
+  const matches = (key) => (providerId === "nvidia" ? !key.providerId || key.providerId === "nvidia" : key.providerId === providerId);
+  return keys.find((key) => key.active && matches(key)) ?? keys.find((key) => matches(key)) ?? null;
 }
 
-export function addVaultKey({ key, label = "API key", verified = false, modelCount = null }) {
+export function addVaultKey({ key, label = "API key", providerId = null, baseUrl = null, verified = false, modelCount = null }) {
   const keys = loadVault();
   const id = `key_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  const makeActive = keys.length === 0;
+  const sameProvider = keys.filter((entry) => (providerId ? entry.providerId === providerId : !entry.providerId));
+  // A provider key becomes "active" only if its provider has no active key yet:
+  // adding a Groq key must not repoint NIM inference at Groq.
+  const makeActive = sameProvider.length === 0;
   const next = [
     ...keys.map((entry) => (makeActive ? { ...entry, active: false } : entry)),
     {
       id,
       key,
       label: label || "API key",
+      providerId,
+      baseUrl,
       active: makeActive,
       verified,
       modelCount,
@@ -153,7 +170,7 @@ export function addVaultKey({ key, label = "API key", verified = false, modelCou
     },
   ];
   saveVault(next);
-  if (makeActive) saveSettings({ apiKey: key });
+  if (makeActive && (!providerId || providerId === "nvidia")) saveSettings({ apiKey: key });
   return id;
 }
 
@@ -165,8 +182,15 @@ export function setActiveVaultKey(id) {
     error.status = 404;
     throw error;
   }
-  saveVault(keys.map((entry) => ({ ...entry, active: entry.id === id })));
-  saveSettings({ apiKey: target.key });
+  // Only NVIDIA keys drive the default NIM credential; others stay provider-scoped.
+  saveVault(
+    keys.map((entry) =>
+      entry.providerId === target.providerId || (!entry.providerId && !target.providerId)
+        ? { ...entry, active: entry.id === id }
+        : entry,
+    ),
+  );
+  if (!target.providerId || target.providerId === "nvidia") saveSettings({ apiKey: target.key });
   return vaultView();
 }
 
@@ -176,9 +200,10 @@ export function removeVaultKey(id) {
   const next = keys.filter((entry) => entry.id !== id);
   saveVault(next);
   if (removed?.active) {
-    const fallback = next[0];
-    saveSettings({ apiKey: fallback?.key ?? "" });
-    if (fallback) saveVault(next.map((entry) => ({ ...entry, active: entry.id === fallback.id })));
+    const sameProvider = next.filter((entry) => (entry.providerId ?? null) === (removed.providerId ?? null));
+    const fallback = sameProvider[0];
+    if (!removed.providerId || removed.providerId === "nvidia") saveSettings({ apiKey: fallback?.key ?? "" });
+    if (fallback) saveVault(next.map((entry) => (entry.id === fallback.id ? { ...entry, active: true } : entry)));
   }
   return vaultView();
 }

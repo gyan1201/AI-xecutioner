@@ -8,12 +8,13 @@
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { extname, join, normalize, resolve } from "node:path";
-import { ensureDirs, paths, publicConfig, resolveCredential, saveSettings, loadSettings, vaultView, addVaultKey, setActiveVaultKey, removeVaultKey } from "./config.mjs";
+import { addVaultKey, ensureDirs, loadSettings, loadVault, paths, publicConfig, removeVaultKey, resolveCredential, saveSettings, setActiveVaultKey, vaultView } from "./config.mjs";
 import { CAPABILITIES, MODEL_CATALOG, catalogSummary, findModel, searchModels } from "./nim/catalog.mjs";
 import { BLUEPRINTS, blueprintStats, getBlueprint, listBlueprints } from "./nim/blueprints.mjs";
 import { loadSkills, searchSkills, skillStats, suggestSkills } from "./nim/skills.mjs";
 import { imageContent } from "./nim/client.mjs";
 import { parseCredentialText } from "./nim/intake.mjs";
+import { addProviderModel, allProviderSummaries, customModels, detectSetup, getProvider, providersView, removeProvider, upsertProvider } from "./nim/providers.mjs";
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -569,18 +570,28 @@ export function createApp(runtime) {
 
   add("GET", "/api/models", async ({ query }) => {
     if (query.refresh === "1") await refreshCatalog({ force: true });
-    const models = searchModels(catalog.models, query.q ?? "").filter((model) =>
+    const vault = loadVault();
+    const connected = customModels({ vault });
+    // Connected models (added from an OpenAI/Groq/NVIDIA snippet) sit beside the
+    // NIM catalog so one picker covers everything this instance can call.
+    const all = [...catalog.models, ...connected];
+    const models = searchModels(all, query.q ?? "").filter((model) =>
       query.capability ? model.capabilities.includes(query.capability) : true,
     );
     const families = query.family ? models.filter((model) => model.family === query.family) : models;
+    const providers = providersView({ vault });
     return {
       models: families,
-      summary: catalogSummary(catalog.models),
+      summary: catalogSummary(all),
       capabilities: CAPABILITIES,
       syncedAt: catalog.syncedAt,
       live: catalog.live,
       error: catalog.error,
       errorCode: catalog.errorCode ?? null,
+      providers,
+      connected: connected.length,
+      catalogTotal: catalog.models.length,
+      nvidiaUnlocked: providers.some((provider) => provider.providerId === "nvidia" && provider.keyPresent),
     };
   });
 
@@ -602,6 +613,163 @@ export function createApp(runtime) {
       throw error;
     }
     return nim.probeModel({ model: body.model });
+  });
+
+  /* ---- providers (one key, every model) ---- */
+
+  add("GET", "/api/providers", async () => {
+    const vault = loadVault();
+    const providers = providersView({ vault });
+    const connected = customModels({ vault });
+    return {
+      providers,
+      available: allProviderSummaries(),
+      connected,
+      nvidia: {
+        configured: providers.some((provider) => provider.providerId === "nvidia" && provider.keyPresent),
+        models: catalog.models.length,
+        url: "https://build.nvidia.com/models",
+      },
+      config: publicConfig(),
+    };
+  });
+
+  add("POST", "/api/providers/detect", async ({ body }) => {
+    const detection = detectSetup(body.text ?? body.snippet ?? "");
+    return {
+      detection: {
+        ...detection,
+        // never echo the raw secret back, even to the same origin
+        key: undefined,
+        hasKey: Boolean(detection.key),
+        keyBytes: detection.key ? detection.key.length : 0,
+      },
+      available: allProviderSummaries(),
+    };
+  });
+
+  add("POST", "/api/providers/apply", async ({ body }) => {
+    const text = String(body.text ?? body.snippet ?? "");
+    const detection = detectSetup(text);
+    const providerId = String(body.providerId ?? detection.providerId ?? "nvidia");
+    const known = getProvider(providerId);
+    const key = String(body.key ?? detection.key ?? "").trim();
+    if (!key) {
+      const error = new Error(
+        detection.warnings[0] ?? "No API key found in that snippet.",
+      );
+      error.status = 400;
+      error.code = "missing_key";
+      error.hint =
+        "Paste the whole snippet (the key included), or type the key into the field. Snippets that read the key from the environment have nothing to extract.";
+      throw error;
+    }
+    if (providerId !== "custom" && !known) {
+      const error = new Error(`Unknown provider: ${providerId}`);
+      error.status = 400;
+      error.code = "unknown_provider";
+      throw error;
+    }
+
+    const baseUrl = String(
+      body.baseUrl ?? (detection.providerId === providerId ? detection.baseUrl : "") ?? "",
+    ).replace(/\/+$/, "") || known?.baseUrl || detection.baseUrl;
+    if (!baseUrl) {
+      const error = new Error("That snippet has a key but no base URL, and the provider is unknown.");
+      error.status = 400;
+      error.code = "missing_base_url";
+      error.hint = "Pick a provider, or paste a snippet that includes base_url (or a full endpoint URL).";
+      throw error;
+    }
+
+    const name = known?.name ?? detection.detectedName ?? "Custom provider";
+
+    // Verification is best effort: a locked-down sandbox cannot reach the
+    // provider, and that must not block local configuration.
+    let verified = false;
+    let modelCount = null;
+    let detail = "";
+    try {
+      const probe = await nimVerify(key, baseUrl);
+      verified = true;
+      modelCount = probe.count;
+      detail = `Verified: ${probe.count} models visible at ${new URL(baseUrl).host}.`;
+    } catch (error) {
+      detail =
+        providerId === "nvidia"
+          ? `Saved, but not verified (${error.message}) — staying in simulation until the key can reach ${new URL(baseUrl).host}. Untick “Force simulation” in Settings to go live anyway.`
+          : `Saved without verification — ${error.message}`;
+    }
+
+    const keyId = addVaultKey({
+      key,
+      label: body.label || `${name} key`,
+      providerId: known ? providerId : null,
+      baseUrl,
+      verified,
+      modelCount,
+    });
+
+    if (providerId === "nvidia") {
+      saveSettings({ baseUrl });
+      // An unverified NVIDIA key would flip the whole product into live mode and
+      // fail every call (no egress, or a typo). Keep simulation until it proves
+      // itself, or until the operator turns the override off in Settings.
+      if (!verified) saveSettings({ simulationOverride: true });
+    }
+
+    const models = [...new Set([body.model, detection.model, ...(Array.isArray(body.models) ? body.models : [])].filter(Boolean))];
+    const provider = upsertProvider({
+      providerId,
+      name,
+      baseUrl,
+      keyId,
+      models,
+      source: text ? "snippet" : "manual",
+      verified,
+      modelCount,
+    });
+
+    // The detection blob carries the raw key; strip it before it leaves the process.
+    const safeDetection = { ...detection, key: undefined, hasKey: Boolean(detection.key), keyBytes: detection.key.length };
+    const model = models[0] ?? known?.sampleModel ?? null;
+    return {
+      ok: true,
+      provider: providersView({ vault: loadVault() }).find((entry) => entry.providerId === provider.providerId) ?? provider,
+      model,
+      models,
+      verified,
+      modelCount,
+      detail,
+      detection: safeDetection,
+      message: `Success! Auto-configured ${name} provider${model ? ` with model ${model}` : ""}.`,
+      keys: vaultView(),
+      providers: providersView({ vault: loadVault() }),
+      config: publicConfig(),
+      nim: nim.status(),
+    };
+  });
+
+  add("POST", "/api/providers/:providerId/models", async ({ params, body }) => {
+    const model = String(body.model ?? "").trim();
+    if (!model) {
+      const error = new Error("model is required");
+      error.status = 400;
+      throw error;
+    }
+    const provider = addProviderModel(params.providerId, model);
+    return { provider, providers: providersView({ vault: loadVault() }) };
+  });
+
+  add("DELETE", "/api/providers/:providerId", async ({ params }) => {
+    const vault = loadVault();
+    const connection = providersView({ vault }).find((entry) => entry.id === params.providerId);
+    removeProvider(params.providerId);
+    if (connection) {
+      const orphan = vault.find((entry) => entry.providerId === params.providerId && entry.baseUrl === connection.baseUrl);
+      if (orphan) removeVaultKey(orphan.id);
+    }
+    return { providers: providersView({ vault: loadVault() }), config: publicConfig() };
   });
 
   /* ---- studio (every NIM endpoint family) ---- */
@@ -680,8 +848,8 @@ export function createApp(runtime) {
     }
   });
 
-  async function nimVerify(key) {
-    const baseUrl = loadSettings().baseUrl;
+  async function nimVerify(key, explicitBaseUrl) {
+    const baseUrl = explicitBaseUrl || loadSettings().baseUrl;
     const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
       headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
       signal: AbortSignal.timeout(15_000),
@@ -757,18 +925,33 @@ export function createApp(runtime) {
    */
   const assetStamp = { version: "", at: 0 };
 
+  /**
+   * Hash every file the browser can reach, not just the entry points: a view
+   * module that changes without its URL changing is a stale module behind a
+   * fresh app.js, which is the blank-page class of bug all over again.
+   */
   function assetVersion() {
     const webRoot = resolve(paths.web);
     const newest = newestMtime(webRoot);
     if (assetStamp.version && newest <= assetStamp.at) return assetStamp.version;
     const hash = createHash("sha256");
-    for (const relative of ["index.html", "styles.css", "app.js", "lib.js"]) {
-      const file = join(webRoot, relative);
-      if (existsSync(file)) hash.update(readFileSync(file));
+    for (const relative of webFiles(webRoot).sort()) {
+      hash.update(relative);
+      hash.update(readFileSync(join(webRoot, relative)));
     }
     assetStamp.version = hash.digest("hex").slice(0, 10);
     assetStamp.at = Date.now();
     return assetStamp.version;
+  }
+
+  function webFiles(root, prefix = "") {
+    const out = [];
+    for (const entry of readdirSync(join(root, prefix), { withFileTypes: true })) {
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) out.push(...webFiles(root, relative));
+      else out.push(relative);
+    }
+    return out;
   }
 
   function newestMtime(directory) {

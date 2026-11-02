@@ -15,10 +15,29 @@ Zero runtime dependencies. One Node process. Data on disk. Runs offline in a det
 
 ![Dashboard](docs/screenshot-dashboard.jpg)
 
+### One key, every model
+
+Paste a key from [build.nvidia.com/models](https://build.nvidia.com/models) and the whole catalog — all 97 models, every endpoint family — goes live. Or paste a **code snippet** instead of a key: Paperclip detects the provider (NVIDIA NIM, OpenAI, Groq, OpenRouter, Together, Mistral, DeepSeek, Fireworks, Perplexity, or any OpenAI-compatible host), extracts the key and base URL from it, adds the model and configures the connection.
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+  base_url="https://integrate.api.nvidia.com/v1",
+  api_key="nvapi-...",
+)
+```
+
+Paste that into **Settings → Quick Setup via Code Snippet** (or **Models → Add a key**) and press **Auto-Configure** — the panel shows what it detected before anything is written: provider, base URL, model, masked key and confidence. Snippets that read the key from `os.environ` are called out instead of silently failing.
+
 | | |
 | --- | --- |
-| ![Skills](docs/screenshot-skills.jpg) | ![Models](docs/screenshot-models.jpg) |
-| ![Blueprints](docs/screenshot-blueprints.jpg) | ![Studio](docs/screenshot-studio.jpg) |
+| ![Models](docs/screenshot-models.jpg) | ![Quick setup](docs/screenshot-quick-setup.jpg) |
+
+| | |
+| --- | --- |
+| ![Skills](docs/screenshot-skills.jpg) | ![Blueprints](docs/screenshot-blueprints.jpg) |
+| ![Models](docs/screenshot-models.jpg) | ![Studio](docs/screenshot-studio.jpg) |
 
 ---
 
@@ -37,10 +56,10 @@ To run against the real NVIDIA API:
 NVIDIA_API_KEY=nvapi-... npm start
 ```
 
-…or paste the key into **Settings → NVIDIA NIM connection** (it is verified against `GET /v1/models`, stored in `data/keys.json` with mode `0600`, and never sent back to the browser).
+…or paste the key — or a whole snippet — into **Settings → Quick Setup via Code Snippet**. It is verified against `GET /v1/models` when the host can reach it, stored in `data/keys.json` with mode `0600`, and never sent back to the browser.
 
 ```bash
-npm test             # 32 tests: catalog, engine, HTTP surface
+npm test             # 54 tests: catalog, engine, providers, HTTP surface, shell invariants
 npm run sync:skills  # re-snapshot github.com/NVIDIA/skills (optional)
 ```
 

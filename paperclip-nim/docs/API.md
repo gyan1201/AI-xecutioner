@@ -103,6 +103,26 @@ A run executes seven steps and appends `run.steps[]`. `verdict` is `{ verdict: "
 | GET | `/api/blueprints/:blueprintId` | one blueprint |
 | POST | `/api/companies/:id/blueprints/:blueprintId` | deploy: staffs agents, creates a goal + backlog, returns the plan |
 
+## Providers (one key, every model)
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/api/providers` | `{ providers, available, connected, nvidia, config }` — connections, the provider registry, and how many models are wired |
+| POST | `/api/providers/detect` | `{ text }` → detection only, no writes: `{ providerId, provider, baseUrl, model, keyMasked, hasKey, confidence, signals, warnings }`. The raw key is never returned |
+| POST | `/api/providers/apply` | `{ text?, providerId?, key?, model?, baseUrl?, label? }` → detects, stores the key in the vault (0600), records the connection, adds the model, returns `{ ok, message, provider, model, verified, detail, config }` |
+| POST | `/api/providers/:providerId/models` | `{ model }` — add another model to a connection (idempotent) |
+| DELETE | `/api/providers/:providerId` | remove the connection and its stored key |
+
+`POST /api/providers/apply` accepts a bare key as well as a snippet, so "add one NVIDIA key → unlock all 97 models" is a single call:
+
+```bash
+curl -X POST localhost:8790/api/providers/apply \
+  -H 'Content-Type: application/json' \
+  -d '{"providerId":"nvidia","key":"nvapi-..."}'
+```
+
+Verification is best effort: when the host cannot reach the provider the connection is still saved (the UI says so, and NVIDIA stays in simulation until the key is verified or `simulationOverride` is turned off).
+
 ## Studio (raw NIM calls)
 
 | Method | Path | Body |

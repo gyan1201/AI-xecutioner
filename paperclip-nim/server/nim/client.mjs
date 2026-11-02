@@ -100,7 +100,7 @@ export function imageContent(text, image, { mimeType = "image/png" } = {}) {
   ];
 }
 
-export function createNimClient({ getConfig, onUsage = () => {}, logger = console } = {}) {
+export function createNimClient({ getConfig, getProviders = () => [], onUsage = () => {}, logger = console } = {}) {
   function config() {
     const cfg = typeof getConfig === "function" ? getConfig() : getConfig ?? {};
     return {
@@ -110,6 +110,25 @@ export function createNimClient({ getConfig, onUsage = () => {}, logger = consol
       timeoutMs: cfg.timeoutMs ?? 180_000,
       maxRetries: cfg.maxRetries ?? 3,
     };
+  }
+
+  /**
+   * A model from a pasted snippet may live at another OpenAI-compatible base
+   * URL with its own key. NVIDIA stays the default; connected providers win
+   * only for the model ids recorded against them.
+   */
+  function targetFor(model) {
+    const cfg = config();
+    if (!model) return cfg;
+    let providers = [];
+    try {
+      providers = typeof getProviders === "function" ? getProviders() : getProviders ?? [];
+    } catch {
+      providers = [];
+    }
+    const owner = providers.find((provider) => (provider.models ?? []).includes(model) && provider.apiKey);
+    if (!owner) return cfg;
+    return { ...cfg, baseUrl: String(owner.baseUrl).replace(/\/+$/, ""), apiKey: owner.apiKey, providerId: owner.id };
   }
 
   function record({ model, usage, latencyMs, simulated, endpoint, artifacts = 0 }) {
@@ -133,8 +152,8 @@ export function createNimClient({ getConfig, onUsage = () => {}, logger = consol
     return event;
   }
 
-  async function request(path, { method = "POST", body, signal, query, retries } = {}) {
-    const cfg = config();
+  async function request(path, { method = "POST", body, model, signal, query, retries } = {}) {
+    const cfg = targetFor(model ?? body?.model);
     if (cfg.simulation) {
       const error = new NimError("Simulation mode is on — this call has no live NIM implementation.", {
         code: "simulation_only",
@@ -314,7 +333,7 @@ export function createNimClient({ getConfig, onUsage = () => {}, logger = consol
     }
 
     if (!body.stream) {
-      const { data, latencyMs } = await request("/chat/completions", { body, signal });
+      const { data, latencyMs } = await request("/chat/completions", { body, model: chosen, signal });
       const normalized = normalizeChat(data, { model: chosen, latencyMs, simulated: false });
       record({ model: normalized.model, usage: normalized.usage, latencyMs, simulated: false, endpoint: endpointLabel });
       if (onDelta && normalized.text) onDelta(normalized.text);
@@ -322,7 +341,8 @@ export function createNimClient({ getConfig, onUsage = () => {}, logger = consol
     }
 
     // ---- streaming path (SSE) ----
-    const url = joinUrl(cfg.baseUrl, "/chat/completions");
+    const streamCfg = targetFor(chosen);
+    const url = joinUrl(streamCfg.baseUrl, "/chat/completions");
     const started = Date.now();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error("timeout")), cfg.timeoutMs);
@@ -332,7 +352,7 @@ export function createNimClient({ getConfig, onUsage = () => {}, logger = consol
       const response = await fetch(url, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${cfg.apiKey}`,
+          Authorization: `Bearer ${streamCfg.apiKey}`,
           "Content-Type": "application/json",
           Accept: "text/event-stream",
           "User-Agent": "paperclip-nim/1.0",
