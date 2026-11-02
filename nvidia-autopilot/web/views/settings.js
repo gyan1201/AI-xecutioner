@@ -77,7 +77,7 @@ export async function render(el, ctx) {
                             <strong class="small">${esc(key.label)}</strong>
                             <span class="mono tiny">${esc(key.keyHint)}</span>
                             ${key.id === vault.activeId ? '<span class="badge badge-green">active</span>' : ""}
-                            <span class="badge ${key.verified ? "badge-green" : "badge-amber"}">${key.verified ? `verified · ${key.modelCount} models` : esc(key.verifyReason ?? "unverified")}</span>
+                            <span class="badge ${key.verified ? "badge-green" : "badge-amber"}">${key.verified ? `verified · ${key.modelCount} models` : `unverified${key.verifyReason ? ` · ${esc(key.verifyReason)}` : ""}`}</span>
                           </div>
                           <div class="tiny faint">${esc(key.source)} · ${key.lastVerifiedAt ? `checked ${esc(new Date(key.lastVerifiedAt).toLocaleString())}` : `added ${esc(new Date(key.addedAt ?? Date.now()).toLocaleString())}`}</div>
                         </div>
