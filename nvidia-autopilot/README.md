@@ -120,6 +120,44 @@ npm start
 Open <http://localhost:8787>. Create a key at
 [build.nvidia.com](https://build.nvidia.com) → any model → **Get API key**.
 
+### Connect by pasting anything
+
+**Settings → Connect NVIDIA** takes the whole request snippet, not just the key.
+It extracts the credential, the endpoints, the model ids and the request
+parameters, verifies the key against NVIDIA, and configures the app — one paste:
+
+```bash
+curl -s localhost:8787/api/settings/key -H 'content-type: application/json' -d @- <<'JSON'
+{ "text": "headers = {"Authorization": "Bearer nvapi-…"}
+payload = {"model": "mistralai/mistral-large-4-1t-a52b", "reasoning_effort": "high"}" }
+JSON
+```
+
+| Accepted as-is | Extracted |
+| --- | --- |
+| `nvapi-…` | key |
+| `export NVIDIA_API_KEY=nvapi-…`, `NVIDIA_API_KEY: nvapi-…` | key |
+| `"Authorization": "Bearer nvapi-…"` (curl, python, JS, Go, YAML) | key |
+| `invoke_url = "https://integrate.api.nvidia.com/v1/chat/completions"` | base URL (path stripped to `/v1`), so self-hosted `http://localhost:8000/v1` works too |
+| `https://ai.api.nvidia.com/v1/genai/{publisher}/{model}` | visual generative AI base URL |
+| `"model": "publisher/model-id"`, `model: publisher/model-id` | default chat model + a selectable catalog entry, even when discovery is offline |
+| `temperature`, `top_p`, `max_tokens`, `frequency_penalty`, `presence_penalty`, `reasoning_effort` | Chat lab defaults (and a `reasoning_effort` control) |
+| `image_url` / `data:image/…` | vision enabled |
+
+Behaviour worth knowing:
+
+- **Verification gates the mode.** The key is tested against `GET /v1/models`
+  first. Success ⇒ the app switches to live inference by itself. A rejection
+  (401/403/429) or an unreachable host ⇒ the key is still saved, the reason is
+  shown, and simulation stays on so nothing breaks — press **Test live** or
+  **Go live anyway** when the network allows it.
+- **Keys are never echoed.** Responses carry `••••qNQZ` only; the file is
+  `data/settings.json` at mode `0600`.
+- **Bad input is a 422 with a hint**, not a silent no-op: masked keys, truncated
+  keys and prose without a key are all called out.
+- `POST /api/settings/key/verify` re-tests the stored credential, and
+  `PUT /api/settings` still accepts a plain key for scripts.
+
 ### Configuration
 
 | Variable | Default | Purpose |
@@ -154,7 +192,7 @@ hint.
 | **Models & routing** | Live catalog from `build.nvidia.com`, filter by capability, pin a model per agent role. |
 | **Guardrails** | Screen any text with NVIDIA safety models and see the raw verdict. |
 | **Visual studio** | Prompt → image via hosted diffusion endpoints, with prompt rewriting by a NIM. |
-| **Settings** | Key, endpoints, cost rates, simulation switch, data locations. |
+| **Settings** | Paste-anything key intake, endpoints, cost rates, simulation switch, extracted defaults, data locations. |
 
 Agent roles resolve automatically: the first pinned model that exists in the live
 catalog wins, otherwise the highest-capability discovered model, otherwise a
@@ -166,6 +204,8 @@ curated default. Every role is pinnable in **Models & routing**.
 
 ```text
 GET    /api/status                 config, roles, counts (never the key)
+POST   /api/settings/key           paste a key or snippet → parse, verify, configure
+POST   /api/settings/key/verify    re-test the stored credential
 GET    /api/models                 live catalog + capability labels + role routing
 POST   /api/chat                   chat completion
 POST   /api/chat/stream            SSE token stream
@@ -231,6 +271,7 @@ nvidia-autopilot/
 │  ├─ company/         Company OS: store.mjs (state, ledger, approvals),
 │  │                   org.mjs (goal → org design), service.mjs (cycles, auto mode)
 │  ├─ paperclip.mjs    Paperclip REST bridge (preview, mirror, typed errors)
+│  ├─ keyintake.mjs    find key/endpoints/models/params in any pasted text
 │  ├─ store.mjs        file-backed runs, events, artifacts, knowledge
 │  ├─ config.mjs       settings precedence + 0600 secret storage
 │  └─ sim.mjs          deterministic offline NIM simulator
@@ -239,7 +280,7 @@ nvidia-autopilot/
 │  └─ views/           dashboard, autopilot, chat, knowledge, models,
 │                      guardrails, studio, companies, settings
 ├─ scripts/seed-demo.mjs
-└─ test/               37 tests: engine, tools, retrieval, company, bridge, HTTP, UI
+└─ test/               46 tests: engine, tools, retrieval, company, bridge, credential intake, HTTP, UI
 ```
 
 Design choices worth knowing:
@@ -258,7 +299,7 @@ Design choices worth knowing:
 ## Tests
 
 ```bash
-npm test                                      # 37 tests, no network, no key
+npm test                                      # 46 tests, no network, no key
 npm i --no-save jsdom && npm test             # + UI render smoke test
 ```
 
@@ -266,9 +307,10 @@ Covers: role resolution and capability inference, the calculator parser,
 chunking/similarity, JSON recovery, a full goal run end-to-end (plan, tools,
 reviews, guardrails, report, artifacts, event ordering), pause/resume/cancel,
 approval gating, budget hard-stops, company creation and cycles, auto mode limits,
-per-agent budgets, the Paperclip bridge (dry run, mirror, error hints), every HTTP
-route, and that each view — including every Company OS tab — renders against the
-live API.
+per-agent budgets, the Paperclip bridge (dry run, mirror, error hints), credential
+intake (snippet/bare-key/env-line parsing, verification that separates a bad key
+from an unreachable host, and never echoing the secret), every HTTP route, and
+that each view — including every Company OS tab — renders against the live API.
 
 ---
 

@@ -1,6 +1,7 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { ROOT } from "./config.mjs";
+import { maskKey, parseCredentialText, pickDefaultModel, verifyCredential } from "./keyintake.mjs";
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -20,6 +21,19 @@ const MIME = {
   ".csv": "text/csv; charset=utf-8",
   ".pdf": "application/pdf",
 };
+
+function normalizeEndpoint(value, fallback) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return fallback;
+  return raw
+    .replace(/\/+$/, "")
+    .replace(/\/(chat\/completions|completions|embeddings|ranking|models)$/i, "")
+    .replace(/\/+$/, "");
+}
+
+function uniqueValues(values) {
+  return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
+}
 
 function sendJson(res, status, body) {
   const payload = JSON.stringify(body);
@@ -145,17 +159,160 @@ export function createApp(runtime, { broadcast = () => {} } = {}) {
         };
       })(),
       node: process.version,
+      defaultModel: runtime.defaultChatModel?.() ?? null,
     };
   });
 
-  route("GET", "/api/settings", async () => ({
-    ...config.public(),
-    roleOverrides: config.read().roleOverrides ?? {},
-  }));
+  route("GET", "/api/settings", async () => {
+    const runtimeSettings = config.read();
+    return {
+      ...config.public(),
+      roleOverrides: runtimeSettings.roleOverrides ?? {},
+      defaults: runtimeSettings.defaults ?? {},
+      pastedModels: runtimeSettings.pastedModels ?? [],
+      keyMeta: runtimeSettings.keyMeta ?? {},
+      defaultModel: runtime.defaultChatModel?.() ?? null,
+    };
+  });
+
+  /**
+   * Credential intake: accepts a bare key, an `NVIDIA_API_KEY=` line, or a whole
+   * SDK/curl snippet, extracts the key + endpoints + models + request params,
+   * verifies the key against NVIDIA, then configures the app.
+   *
+   * Live inference is only switched on when verification succeeds (or when the
+   * caller asks for it explicitly), so a bad paste or an offline host can never
+   * brick the app.
+   */
+  route("POST", "/api/settings/key", async ({ body }) => {
+    const text =
+      typeof body.text === "string"
+        ? body.text
+        : typeof body.snippet === "string"
+          ? body.snippet
+          : typeof body.apiKey === "string"
+            ? body.apiKey
+            : "";
+    if (!text.trim()) {
+      throw Object.assign(new Error("Paste your NVIDIA key or the request snippet that contains it."), {
+        status: 422,
+        hint: "Anything works: `nvapi-…`, `NVIDIA_API_KEY=nvapi-…`, or the whole python/curl example.",
+      });
+    }
+
+    const parsed = parseCredentialText(text);
+    const explicitKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
+    const apiKey = explicitKey || parsed.apiKey;
+    if (!apiKey) {
+      throw Object.assign(new Error("No NVIDIA API key found in that text."), {
+        status: 422,
+        hint: parsed.warnings[0] ?? "Look for an `nvapi-…` token in the snippet.",
+        body: { warnings: parsed.warnings },
+      });
+    }
+
+    const current = config.load();
+    const nimBaseUrl = normalizeEndpoint(body.nimBaseUrl || parsed.nimBaseUrl || current.nimBaseUrl, current.nimBaseUrl);
+    const genaiBaseUrl = normalizeEndpoint(body.genaiBaseUrl || parsed.genaiBaseUrl || current.genaiBaseUrl, current.genaiBaseUrl);
+
+    const verification =
+      body.verify === false
+        ? { attempted: false, ok: false, status: 0, reason: "skipped", hint: "Verification skipped at the caller's request.", latencyMs: 0 }
+        : await verifyCredential({ apiKey, baseUrl: nimBaseUrl, timeoutMs: Number(body.timeoutMs) || 12_000 });
+
+    const requestedMode = ["auto", "live", "simulation"].includes(body.mode) ? body.mode : "auto";
+    const simulation =
+      requestedMode === "simulation" ? true : requestedMode === "live" ? false : verification.ok ? false : current.simulation;
+
+    const existing = config.read();
+    const defaults = { ...(existing.defaults ?? {}) };
+    if (parsed.models.length) defaults.chatModel = pickDefaultModel(parsed, parsed.models);
+    if (Object.keys(parsed.params).length) defaults.params = { ...(existing.defaults?.params ?? {}), ...parsed.params };
+    if (parsed.flags?.vision) defaults.vision = true;
+    if (parsed.flags?.reasoningEffortUnsupported) delete defaults.reasoningEffort;
+
+    const pastedModels = uniqueValues([...(existing.pastedModels ?? []), ...parsed.models]).slice(-24);
+    const keyMeta = {
+      ...(existing.keyMeta ?? {}),
+      source: parsed.source === "key" ? "pasted" : "pasted-snippet",
+      addedAt: new Date().toISOString(),
+      verified: Boolean(verification.ok),
+      verifyReason: verification.reason ?? null,
+      keyHint: maskKey(apiKey),
+      modelCount: verification.modelCount ?? 0,
+      baseUrl: nimBaseUrl,
+    };
+
+    config.write({
+      apiKey,
+      nimBaseUrl,
+      genaiBaseUrl,
+      simulation,
+      defaults,
+      pastedModels,
+      keyMeta,
+    });
+
+    const models = await runtime.refreshModels();
+    const notes = [];
+    if (verification.ok) notes.push(`Key verified — ${verification.modelCount} models available on this account.`);
+    else if (verification.reason === "unreachable") {
+      notes.push("Key saved, but this host cannot reach NVIDIA yet, so simulation stays on. Switch to live once the network allows it.");
+    } else if (verification.reason === "skipped") notes.push("Key saved without verification.");
+    else notes.push(`Key saved, but NVIDIA did not accept it (${verification.reason}). Simulation stays on.`);
+    if (defaults.chatModel) notes.push(`Default chat model set to ${defaults.chatModel}.`);
+    if (parsed.params && Object.keys(parsed.params).length) {
+      notes.push(`Request defaults applied: ${Object.keys(parsed.params).join(", ")}.`);
+    }
+    if (parsed.flags?.vision) notes.push("Snippet uses vision — image attachments will be offered in Chat lab.");
+
+    return {
+      applied: true,
+      live: !config.load().simulation,
+      parsed: {
+        source: parsed.source,
+        keyHint: parsed.keyHint,
+        nimBaseUrl,
+        genaiBaseUrl,
+        models: parsed.models,
+        params: parsed.params,
+        flags: parsed.flags,
+        warnings: parsed.warnings,
+      },
+      verification,
+      notes,
+      modelCount: models.models.length,
+      config: config.public(),
+    };
+  });
+
+  /** Re-test the stored (or supplied) credential without changing anything. */
+  route("POST", "/api/settings/key/verify", async ({ body }) => {
+    const current = config.load();
+    const apiKey = String(body.apiKey ?? "").trim() || current.apiKey;
+    const baseUrl = normalizeEndpoint(body.nimBaseUrl || current.nimBaseUrl, current.nimBaseUrl);
+    const verification = await verifyCredential({ apiKey, baseUrl, timeoutMs: Number(body.timeoutMs) || 12_000 });
+    if (verification.ok && body.apply === true) {
+      config.write({ simulation: false });
+      await runtime.refreshModels();
+    }
+    return { verification, live: !config.load().simulation, config: config.public() };
+  });
 
   route("PUT", "/api/settings", async ({ body }) => {
     const patch = {};
-    if (typeof body.apiKey === "string") patch.apiKey = body.apiKey.trim();
+    if (typeof body.apiKey === "string") {
+      patch.apiKey = body.apiKey.trim();
+      const previous = config.read().keyMeta ?? {};
+      patch.keyMeta = patch.apiKey
+        ? { ...previous, source: "manual", addedAt: new Date().toISOString(), verified: false, keyHint: maskKey(patch.apiKey), verifyReason: "unverified" }
+        : {};
+      if (!patch.apiKey) {
+        // The pasted models and request defaults came in with that credential.
+        patch.pastedModels = [];
+        patch.defaults = {};
+      }
+    }
     if (typeof body.simulation === "boolean") patch.simulation = body.simulation;
     if (typeof body.nimBaseUrl === "string" && body.nimBaseUrl.trim()) patch.nimBaseUrl = body.nimBaseUrl.trim();
     if (typeof body.genaiBaseUrl === "string" && body.genaiBaseUrl.trim()) patch.genaiBaseUrl = body.genaiBaseUrl.trim();
@@ -207,6 +364,7 @@ export function createApp(runtime, { broadcast = () => {} } = {}) {
           },
         ]),
       ),
+      defaultModel: runtime.defaultChatModel?.() ?? models.defaultModel ?? null,
       simulated: models.simulated ?? config.load().simulation,
       degraded: Boolean(models.degraded),
       error: models.error ?? null,
@@ -220,7 +378,7 @@ export function createApp(runtime, { broadcast = () => {} } = {}) {
     const signal = AbortSignal.timeout(config.load().requestTimeoutMs);
     const messages = Array.isArray(body.messages) ? body.messages : [];
     if (!messages.length) throw Object.assign(new Error("messages[] is required"), { status: 422 });
-    const model = String(body.model || runtime.activeRoles().operator.model);
+    const model = String(body.model || runtime.defaultChatModel?.() || runtime.activeRoles().operator.model);
     const response = await nim.chat({
       model,
       messages,
@@ -242,7 +400,7 @@ export function createApp(runtime, { broadcast = () => {} } = {}) {
     const controller = new AbortController();
     req.on("close", () => controller.abort());
     const sse = openSse(res, { onClose: () => controller.abort() });
-    const model = String(body.model || runtime.activeRoles().operator.model);
+    const model = String(body.model || runtime.defaultChatModel?.() || runtime.activeRoles().operator.model);
     try {
       sse.send("start", { model, simulated: config.load().simulation });
       for await (const event of nim.chatStream({

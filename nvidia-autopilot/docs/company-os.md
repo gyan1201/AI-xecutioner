@@ -253,7 +253,7 @@ agents working in the background appear without a refresh.
 ## 7. Verification
 
 ```bash
-npm test        # 37 tests, no network, no key
+npm test        # 46 tests, no network, no key
 ```
 
 The company suite (`test/company.test.mjs`) asserts:

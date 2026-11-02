@@ -6,6 +6,7 @@ import { createCompanyService } from "./company/service.mjs";
 import { createPaperclipClient } from "./paperclip.mjs";
 import { loadConfig, writeRuntimeSettings, readRuntimeSettings, publicConfig } from "./config.mjs";
 import { MODEL_PRESETS, ROLE_DEFINITIONS, describeModel, resolveRoles } from "./catalog.mjs";
+import { pickDefaultModel } from "./keyintake.mjs";
 
 /**
  * Wires the services together and owns the short-lived model cache, role
@@ -49,15 +50,30 @@ export function createRuntime({ onEvent } = {}) {
     try {
       const response = await nim.listModels();
       const models = (response.data ?? []).map((entry) => describeModel(entry.id, { ownedBy: entry.owned_by }));
+      // Models named in a pasted snippet are usable even when discovery cannot
+      // see them (offline host, preview key, brand-new release).
+      const runtime = readRuntimeSettings();
+      for (const id of runtime.pastedModels ?? []) {
+        if (typeof id !== "string" || !id.includes("/")) continue;
+        if (models.some((model) => model.id === id)) continue;
+        models.push(describeModel(id, { ownedBy: String(id).split("/")[0], pasted: true }));
+      }
       const ids = models.map((model) => model.id);
       const roles = resolveRoles(ids);
-      const overrides = readRuntimeSettings().roleOverrides ?? {};
+      const overrides = runtime.roleOverrides ?? {};
       for (const [role, model] of Object.entries(overrides)) {
         if (roles[role] && model) {
           roles[role] = { ...roles[role], model: String(model), resolvedFrom: "operator" };
         }
       }
-      modelCache = { at: Date.now(), models, roles, error: null, simulated: Boolean(response.simulated) };
+      modelCache = {
+        at: Date.now(),
+        models,
+        roles,
+        error: null,
+        simulated: Boolean(response.simulated),
+        defaultModel: pickDefaultModel({ models: runtime.pastedModels ?? [] }, ids),
+      };
       return { ...modelCache, cached: false };
     } catch (error) {
       if (modelCache.models.length) return { ...modelCache, error: error.message, cached: true };
@@ -68,6 +84,12 @@ export function createRuntime({ onEvent } = {}) {
       modelCache = { at: 0, models, roles, error: error.message, degraded: true };
       return { ...modelCache, cached: false };
     }
+  }
+
+  /** Model the operator configured by pasting a key/snippet, if any. */
+  function defaultChatModel() {
+    const runtime = readRuntimeSettings();
+    return runtime.defaults?.chatModel ?? runtime.pastedModels?.[0] ?? null;
   }
 
   function activeRoles() {
@@ -120,6 +142,8 @@ export function createRuntime({ onEvent } = {}) {
     autopilot,
     company,
     paperclip,
+    defaultChatModel,
+    refreshModels: (options = {}) => loadModels({ force: true, ...options }),
     metrics,
     loadModels,
     activeRoles,

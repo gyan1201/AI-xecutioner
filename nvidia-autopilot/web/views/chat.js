@@ -10,15 +10,23 @@ const PERSONAS = [
 export async function render(el, ctx) {
   const catalog = await api.get("/api/models").catch(() => ({ models: [], roles: {} }));
   const chatModels = catalog.models.filter((model) => model.capabilities.includes("chat") || model.capabilities.includes("reasoning"));
-  const defaultModel = catalog.roles?.operator?.model ?? chatModels[0]?.id ?? "";
+  const defaults = await api.get("/api/settings").catch(() => ({}));
+  const preferred = catalog.defaultModel ?? defaults.defaultModel ?? defaults.defaults?.chatModel ?? null;
+  const defaultModel =
+    (preferred && chatModels.some((model) => model.id === preferred) ? preferred : null) ??
+    catalog.roles?.operator?.model ??
+    chatModels[0]?.id ??
+    "";
+  const pastedParams = defaults.defaults?.params ?? {};
   const hasVision = chatModels.some((model) => model.capabilities.includes("vision"));
 
   const state = {
     messages: [],
     model: defaultModel,
     system: "",
-    temperature: 0.4,
-    maxTokens: 1200,
+    temperature: typeof pastedParams.temperature === "number" ? pastedParams.temperature : 0.4,
+    maxTokens: typeof pastedParams.maxTokens === "number" ? Math.min(pastedParams.maxTokens, 8000) : 1200,
+    reasoningEffort: pastedParams.reasoningEffort ?? "",
     tools: false,
     json: false,
     image: null,
@@ -78,6 +86,13 @@ export async function render(el, ctx) {
               <input type="number" id="maxTokens" min="64" max="8000" step="64" value="${state.maxTokens}" />
             </div>
           </div>
+          <div class="field" style="margin-top:var(--space-3)">
+            <label for="reasoning">Reasoning effort <span class="tiny faint">(sent as <code>reasoning_effort</code>)</span></label>
+            <select id="reasoning">
+              <option value="" ${state.reasoningEffort ? "" : "selected"}>model default</option>
+              ${["low", "medium", "high"].map((level) => `<option value="${level}" ${state.reasoningEffort === level ? "selected" : ""}>${level}</option>`).join("")}
+            </select>
+          </div>
           <div class="stack" style="margin-top:var(--space-3);gap:8px">
             <label class="check"><input type="checkbox" id="tools" /> Enable agent tools</label>
             <label class="check"><input type="checkbox" id="json" /> JSON output mode</label>
@@ -115,6 +130,7 @@ export async function render(el, ctx) {
       messages: `${state.messages.length + (state.system ? 1 : 0)} message(s)`,
       tools: state.tools ? "agent toolset" : false,
       response_format: state.json ? { type: "json_object" } : undefined,
+      extra: state.reasoningEffort ? { reasoning_effort: state.reasoningEffort } : undefined,
     };
     el.querySelector("#preview").textContent = JSON.stringify(body, null, 2);
   }
@@ -176,6 +192,7 @@ export async function render(el, ctx) {
           maxTokens: state.maxTokens,
           tools: state.tools,
           json: state.json,
+          ...(state.reasoningEffort ? { extra: { reasoning_effort: state.reasoningEffort } } : {}),
         },
         {
           signal: state.controller.signal,
@@ -223,6 +240,10 @@ export async function render(el, ctx) {
   });
   el.querySelector("#maxTokens").addEventListener("change", (event) => {
     state.maxTokens = Number(event.target.value) || 1200;
+    preview();
+  });
+  el.querySelector("#reasoning").addEventListener("change", (event) => {
+    state.reasoningEffort = event.target.value;
     preview();
   });
   el.querySelector("#tools").addEventListener("change", (event) => {

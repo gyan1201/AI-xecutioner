@@ -16,18 +16,36 @@ export async function render(el, ctx) {
 
     <div class="split">
       <div class="stack">
-        <div class="card">
-          <div class="card-head"><span class="card-title">NVIDIA API key</span><span class="tiny mono faint">${esc(settings.keyHint ?? "not set")}</span></div>
+        <div class="card" id="connect-card">
+          <div class="card-head">
+            <span class="card-title">Connect NVIDIA</span>
+            <span class="row-wrap">
+              <span class="badge ${settings.hasApiKey ? (settings.simulation ? "badge-amber" : "badge-green") : "badge-dim"}">
+                ${settings.hasApiKey ? (settings.simulation ? "key saved · simulation" : "live") : "no key"}
+              </span>
+              <span class="tiny mono faint">${esc(settings.keyHint ?? "not set")}</span>
+            </span>
+          </div>
+          <p class="small muted">
+            Paste <strong>anything</strong> that contains your key — the bare <code>nvapi-…</code> token,
+            an <code>NVIDIA_API_KEY=…</code> line, or the whole python / curl / SDK snippet. The key,
+            endpoints, model ids and request parameters are extracted, the key is verified against NVIDIA,
+            and the app configures itself.
+          </p>
           <div class="field">
-            <label for="apiKey">Key</label>
-            <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="nvapi-…" value="" />
-            <span class="tiny faint">Stored at <code>data/settings.json</code> with file mode 0600. It is never returned to the browser.</span>
+            <label for="key-paste">Key, env line, or request snippet</label>
+            <textarea id="key-paste" rows="6" spellcheck="false" autocomplete="off"
+              placeholder='nvapi-…&#10;&#10;— or —&#10;&#10;export NVIDIA_API_KEY=nvapi-…&#10;&#10;— or the whole snippet —&#10;&#10;invoke_url = "https://integrate.api.nvidia.com/v1/chat/completions"&#10;headers = {"Authorization": "Bearer nvapi-…"}&#10;payload = {"model": "mistralai/mistral-large-4-1t-a52b", "reasoning_effort": "high"}'></textarea>
+            <span class="tiny faint">Stored at <code>data/settings.json</code> with file mode 0600. It is never returned to the browser and never sent anywhere except NVIDIA.</span>
           </div>
           <div class="row-wrap" style="margin-top:var(--space-3)">
-            <button class="btn btn-primary" id="save-key">Save key</button>
-            <button class="btn" id="test">Test connection</button>
+            <button class="btn btn-primary" id="connect">Connect &amp; auto-configure</button>
+            <button class="btn" id="test">Test live</button>
+            ${settings.hasApiKey && settings.simulation ? `<button class="btn btn-sm" id="go-live">Go live anyway</button>` : ""}
             ${settings.hasApiKey ? `<button class="btn btn-danger btn-sm" id="clear-key">Remove key</button>` : ""}
           </div>
+          <div id="paste-preview" style="margin-top:var(--space-3)"></div>
+          <div id="key-result" style="margin-top:var(--space-3)"></div>
           <div id="test-result" style="margin-top:var(--space-3)"></div>
         </div>
 
@@ -38,8 +56,16 @@ export async function render(el, ctx) {
             Force simulation (never call NVIDIA, even with a key)
           </label>
           <p class="small muted">
-            With no key, simulation is automatic. When a key exists, unchecking this makes every call hit the live NIM API.
+            With no key, simulation is automatic. <strong>Connect &amp; auto-configure</strong> verifies the key and
+            switches to live inference on its own — unless this host cannot reach NVIDIA, in which case the key is
+            saved and simulation stays on until you press <strong>Test live</strong>.
           </p>
+          ${settings.keyMeta?.addedAt ? `<dl class="kv" style="margin-top:10px">
+            <dt>Key source</dt><dd class="mono tiny">${esc(settings.keyMeta.source ?? "manual")}</dd>
+            <dt>Added</dt><dd class="tiny">${esc(new Date(settings.keyMeta.addedAt).toLocaleString())}</dd>
+            <dt>Verified</dt><dd class="tiny">${settings.keyMeta.verified ? "yes" : `no${settings.keyMeta.verifyReason ? ` (${esc(settings.keyMeta.verifyReason)})` : ""}`}</dd>
+            ${settings.keyMeta.modelCount ? `<dt>Models</dt><dd class="mono tiny">${settings.keyMeta.modelCount}</dd>` : ""}
+          </dl>` : ""}
         </div>
 
         <div class="card">
@@ -79,6 +105,19 @@ export async function render(el, ctx) {
       </div>
 
       <div class="side-stack">
+        <div class="card">
+          <div class="card-head"><span class="card-title">Auto-configured defaults</span></div>
+          ${
+            settings.defaultModel || (settings.pastedModels ?? []).length
+              ? `<dl class="kv">
+                  ${settings.defaultModel ? `<dt>Chat model</dt><dd class="mono tiny">${esc(settings.defaultModel)}</dd>` : ""}
+                  ${(settings.pastedModels ?? []).length ? `<dt>Pasted models</dt><dd class="tiny mono">${(settings.pastedModels ?? []).map((id) => esc(id)).join("<br>")}</dd>` : ""}
+                  ${Object.keys(settings.defaults?.params ?? {}).length ? `<dt>Params</dt><dd class="tiny mono">${esc(JSON.stringify(settings.defaults.params))}</dd>` : ""}
+                </dl>
+                <p class="tiny faint" style="margin-top:8px">Extracted from your paste. They seed Chat lab and appear in Models &amp; routing even when discovery is offline.</p>`
+              : `<p class="small muted">Nothing pasted yet. A snippet becomes a default chat model, request parameters and a list of usable model ids.</p>`
+          }
+        </div>
         <div class="card">
           <div class="card-head"><span class="card-title">Environment variables</span></div>
           <pre style="margin:0"><code>NVIDIA_API_KEY=nvapi-…
@@ -127,11 +166,100 @@ NVIDIA_AUTOPILOT_DATA_DIR=./data</code></pre>
     }
   };
 
-  el.querySelector("#save-key").addEventListener("click", async () => {
-    const value = el.querySelector("#apiKey").value.trim();
-    if (!value) return toast("Paste a key first.", "warn");
-    const saved = await patch({ apiKey: value, simulation: false }, "Key saved — switching to live inference");
-    if (saved) el.querySelector("#apiKey").value = "";
+  const resultHost = () => el.querySelector("#key-result");
+
+  function paintParsed(parsed) {
+    const host = el.querySelector("#paste-preview");
+    if (!parsed) return;
+    const chips = [
+      parsed.keyHint ? `key ${parsed.keyHint}` : "",
+      parsed.nimBaseUrl ? `endpoint ${parsed.nimBaseUrl}` : "",
+      ...(parsed.models ?? []).map((id) => `model ${id}`),
+      ...Object.entries(parsed.params ?? {}).map(([key, value]) => `${key} ${value}`),
+      parsed.flags?.vision ? "vision" : "",
+      parsed.flags?.stream ? "streaming" : "",
+    ].filter(Boolean);
+    host.innerHTML = `
+      <div class="chips">${chips.map((chip) => `<span class="chip">${esc(chip)}</span>`).join("") || '<span class="tiny faint">nothing detected yet</span>'}</div>
+      ${(parsed.warnings ?? []).map((warning) => `<div class="tiny faint" style="margin-top:6px">· ${esc(warning)}</div>`).join("")}`;
+  }
+
+  function paintVerification(verification) {
+    if (!verification) return "";
+    if (verification.ok) {
+      return `<div class="banner green"><span>✓</span><div><strong>Key verified.</strong> ${verification.modelCount} models available in ${verification.latencyMs}ms.</div></div>`;
+    }
+    if (verification.reason === "unreachable") {
+      return `<div class="banner"><span>◐</span><div><strong>Saved, but NVIDIA is unreachable from this host.</strong> ${esc(verification.detail ?? "")} Simulation stays on — press <strong>Test live</strong> once the network allows it.</div></div>`;
+    }
+    if (verification.reason === "skipped") {
+      return `<div class="banner"><span>◐</span><div>Saved without verification.</div></div>`;
+    }
+    return `<div class="banner red"><span>✕</span><div><strong>NVIDIA rejected the key (${esc(verification.reason ?? verification.status)}).</strong> ${esc(verification.hint ?? "")}</div></div>`;
+  }
+
+  el.querySelector("#connect").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const text = el.querySelector("#key-paste").value.trim();
+    if (!text) return toast("Paste a key or a snippet first.", "warn");
+    button.disabled = true;
+    button.innerHTML = `<span class="spinner"></span> reading & verifying`;
+    resultHost().innerHTML = "";
+    try {
+      const result = await api.post("/api/settings/key", { text, mode: "auto" });
+      paintParsed(result.parsed);
+      resultHost().innerHTML = `
+        ${paintVerification(result.verification)}
+        <div class="stack small" style="margin-top:8px">
+          ${(result.notes ?? []).map((note) => `<div class="faint">· ${esc(note)}</div>`).join("")}
+        </div>`;
+      toast(result.live ? "Key connected — live inference is on" : "Key saved — still in simulation");
+      await ctx.refresh();
+      el.querySelector("#key-paste").value = "";
+      if (result.live) setTimeout(() => location.reload(), 900);
+    } catch (error) {
+      resultHost().innerHTML = `<div class="banner red"><span>✕</span><div><strong>${esc(error.message)}</strong>${error.hint ? ` ${esc(error.hint)}` : ""}</div></div>`;
+      if (error.detail?.warnings) paintParsed({ warnings: error.detail.warnings });
+    } finally {
+      button.disabled = false;
+      button.textContent = "Connect & auto-configure";
+    }
+  });
+
+  el.querySelector("#test").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const host = el.querySelector("#test-result");
+    button.disabled = true;
+    button.innerHTML = `<span class="spinner"></span> testing`;
+    host.innerHTML = "";
+    try {
+      const pasted = el.querySelector("#key-paste").value.trim();
+      const result = pasted
+        ? await api.post("/api/settings/key", { text: pasted, mode: "auto" })
+        : await api.post("/api/settings/key/verify", {});
+      paintParsed(result.parsed ?? null);
+      host.innerHTML = `${paintVerification(result.verification)}${
+        result.verification?.ok && ctx.state?.status?.config?.simulation
+          ? `<div class="row-wrap" style="margin-top:8px"><button class="btn btn-primary btn-sm" id="enable-live">Switch to live now</button></div>`
+          : ""
+      }`;
+      host.querySelector("#enable-live")?.addEventListener("click", async () => {
+        await patch({ simulation: false }, "Live inference enabled");
+        location.reload();
+      });
+      await ctx.refresh();
+    } catch (error) {
+      host.innerHTML = `<div class="banner red"><span>✕</span><div><strong>Connection failed.</strong> ${esc(error.message)}${error.hint ? ` — ${esc(error.hint)}` : ""}</div></div>`;
+    } finally {
+      button.disabled = false;
+      button.textContent = "Test live";
+    }
+  });
+
+  el.querySelector("#go-live")?.addEventListener("click", async () => {
+    if (!confirm("Send every call to NVIDIA now? If this host cannot reach NVIDIA, runs will fail.")) return;
+    const saved = await patch({ simulation: false }, "Live inference enabled");
+    if (saved) location.reload();
   });
 
   el.querySelector("#clear-key")?.addEventListener("click", async () => {
@@ -142,26 +270,6 @@ NVIDIA_AUTOPILOT_DATA_DIR=./data</code></pre>
 
   el.querySelector("#simulation").addEventListener("change", async (event) => {
     await patch({ simulation: event.target.checked }, event.target.checked ? "Simulation enabled" : "Simulation disabled");
-  });
-
-  el.querySelector("#test").addEventListener("click", async (event) => {
-    const button = event.currentTarget;
-    const host = el.querySelector("#test-result");
-    button.disabled = true;
-    button.innerHTML = `<span class="spinner"></span> testing`;
-    host.innerHTML = "";
-    try {
-      const result = await api.post("/api/settings/test", {});
-      host.innerHTML = result.simulated
-        ? `<div class="banner"><span>◐</span><div>Simulation mode — ${result.modelCount} stand-in models, no NVIDIA call was made.</div></div>`
-        : `<div class="banner green"><span>✓</span><div>Connected in ${result.latencyMs}ms · ${result.modelCount} models available on your account.</div></div>`;
-      await ctx.refresh();
-    } catch (error) {
-      host.innerHTML = `<div class="banner red"><span>✕</span><div><strong>Connection failed.</strong> ${esc(error.message)}${error.hint ? ` — ${esc(error.hint)}` : ""}</div></div>`;
-    } finally {
-      button.disabled = false;
-      button.textContent = "Test connection";
-    }
   });
 
   el.querySelector("#save-endpoints").addEventListener("click", () =>
