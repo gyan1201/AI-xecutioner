@@ -895,7 +895,12 @@ export function createService({ store, nim, engine, bus }) {
     } else if (payload.baseline !== undefined || payload.target !== undefined) {
       // The numbers are the truth: 24 → 8 improves downward even if the goal was
       // first created with only a title. An explicit `direction` is never inferred.
-      goal.direction = Number(goal.target) < Number(goal.baseline) ? "decrease" : "increase";
+      // An unmeasured baseline stays unknown — it is not zero.
+      const baseline = Number(goal.baseline);
+      const target = Number(goal.target);
+      if (goal.baseline !== null && goal.baseline !== undefined && Number.isFinite(baseline) && Number.isFinite(target)) {
+        goal.direction = target < baseline ? "decrease" : "increase";
+      }
     }
     if (payload.status !== undefined) goal.status = String(payload.status);
     recomputeCompany(company);

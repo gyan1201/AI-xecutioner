@@ -91,6 +91,9 @@ export async function render(root, ctx) {
             <span class="tag">${primaryGoal.baseline === null || primaryGoal.baseline === undefined ? "baseline not measured yet" : `baseline ${num(primaryGoal.baseline)}`}</span>
             <span class="tag">${goalDirection(primaryGoal)}</span>
           </div>
+          ${(primaryGoal.measurements ?? []).length
+            ? `<div class="hint" style="margin-top:8px">Last measured <b>${esc(num(primaryGoal.measurements[0].value))}${primaryGoal.unit ? ` ${esc(primaryGoal.unit)}` : ""}</b> · ${esc(primaryGoal.measurements[0].source)}</div>`
+            : `<div class="hint" style="margin-top:8px">No measurement recorded yet — run the baseline issue to set one.</div>`}
           <div class="hint" style="margin-top:10px">Owned by ${esc(company.agents.find((agent) => agent.id === primaryGoal.ownerId)?.name ?? "unassigned")} · due ${primaryGoal.dueAt ? new Date(primaryGoal.dueAt).toLocaleDateString() : "—"}</div>
         ` : `<div class="hint">No goal yet.</div>`}
       </div>

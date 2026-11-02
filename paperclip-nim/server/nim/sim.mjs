@@ -106,7 +106,7 @@ const DELIVERABLE_SECTIONS = [
   ["Objective", (ctx) => `Ship "${ctx.title}" for ${ctx.company}. ${ctx.criteria.length ? `Done means: ${ctx.criteria.join("; ")}.` : "Done means the artefact is reviewable and linked in this issue."}`],
   ["Approach", (ctx) => ctx.bullets.slice(0, 3).map((line, index) => `${index + 1}. ${line}`).join("\n")],
   ["What we did", (ctx) => ctx.bullets.slice(0, 5).map((line) => `- ${line}`).join("\n")],
-  ["Numbers", (ctx) => `| Metric | Baseline | Now | Target |\n| --- | --- | --- | --- |\n| ${ctx.metrics[0]} | ${ctx.baseline[0]} | ${ctx.baseline[1]} | ${ctx.baseline[2]} |\n| ${ctx.metrics[1]} | ${ctx.baseline[3]} | ${ctx.baseline[4]} | ${ctx.baseline[5]} |`],
+  ["Numbers", (ctx) => `| Metric | Baseline | Now | Target |\n| --- | --- | --- | --- |\n| ${ctx.metrics[0]} | ${ctx.baseline[0]} | ${ctx.baseline[1]} | ${ctx.baseline[2]} |\n| ${ctx.metrics[1]} | ${ctx.baseline[3]} | ${ctx.baseline[4]} | ${ctx.baseline[5]} |${ctx.measurement ? `\n\nMeasured ${ctx.metric}: ${ctx.measurement.value} ${ctx.unit} (source: ${ctx.measurement.source})` : ""}`],
   ["Risks and open questions", (ctx) => ctx.bullets.slice(0, 3).map((line) => `- **${ctx.metrics[0]} risk:** ${line}`).join("\n")],
   ["Next step", (ctx) => `Hand to review with the ${ctx.reviewer} role. If accepted, open the follow-up: ${ctx.next}.`],
 ];
@@ -120,6 +120,25 @@ function contextFrom(prompt, fallback = {}) {
   const title = titleMatch?.[1]?.trim() ?? "this work item";
   const seed = hash32(title);
   const random = rng(seed);
+
+  // The goal contract the engine puts in the prompt. Parsing it here lets the
+  // simulated deliverable report a measured value for the *right* metric, so
+  // the goal loop is exercised end to end without a key.
+  const goal = prompt.match(/Goal:\s*(.+)/i)?.[1]?.trim() ?? "";
+  const metricLine = prompt.match(/Metric:\s*(.+)/i)?.[1]?.trim() ?? "";
+  const targetMatch = metricLine.match(/target\s+([\d.]+)\s*([a-z%]*)/i);
+  const baselineMatch = metricLine.match(/baseline\s+([\d.]+)\s*([a-z%]*)/i);
+  const target = targetMatch ? Number(targetMatch[1]) : null;
+  const unit = (targetMatch?.[2] || baselineMatch?.[2] || "").trim();
+  const baseline = baselineMatch ? Number(baselineMatch[1]) : null;
+  const metric = metricLine.split("·")[0].replace(/\s*\([^)]*\)\s*$/, "").trim();
+  const isMeasurement = /baseline|measure/i.test(title);
+  const company = companyMatch?.[1]?.trim() ?? "the company";
+  let measurement = null;
+  if (isMeasurement && Number.isFinite(target) && target > 0) {
+    const value = measuredValue(target, baseline, random);
+    measurement = { value, source: `${company} run trace + ${metric || "metric"} dashboard` };
+  }
   const knowledgeSentences = knowledge ? sentences(knowledge[1]) : [];
   const bullets = (knowledgeSentences.length ? knowledgeSentences : sentences(prompt))
     .filter((sentence) => !/^(issue|agent|company):/i.test(sentence))
@@ -134,7 +153,7 @@ function contextFrom(prompt, fallback = {}) {
   ];
   return {
     title,
-    company: companyMatch?.[1]?.trim() ?? "the company",
+    company,
     agent: agentMatch?.[1]?.trim() ?? "the assignee",
     reviewer: pick(["Quality Lead", "Staff Engineer", "Head of Ops"], random),
     criteria,
@@ -150,8 +169,29 @@ function contextFrom(prompt, fallback = {}) {
       random,
     ),
     baseline: ["18%", "31%", "45%"],
+    goal,
+    metric,
+    target,
+    unit,
+    baselineValue: baseline,
+    isMeasurement,
+    measurement,
     ...fallback,
   };
+}
+
+/**
+ * A deterministic measured value for a metric goal. With no baseline it picks a
+ * plausible starting point (1.2–1.8× the target); with one it moves 55–90% of
+ * the way from the baseline to the target, so the goal visibly progresses
+ * without ever overshooting into a fake 100%.
+ */
+function measuredValue(target, baseline, random) {
+  if (!Number.isFinite(baseline)) {
+    return Math.round(target * (1.2 + random() * 0.6) * 10) / 10;
+  }
+  const progress = 0.55 + random() * 0.35;
+  return Math.round((baseline + (target - baseline) * progress) * 10) / 10;
 }
 
 function deliverable(prompt, random) {
@@ -159,7 +199,13 @@ function deliverable(prompt, random) {
   const header = `## ${ctx.title}\n\n_Owner: ${ctx.agent} · Company: ${ctx.company}_.\n`;
   const body = DELIVERABLE_SECTIONS.map(([heading, render]) => `### ${heading}\n${render(ctx)}`).join("\n\n");
   const appendix = ctx.bullets.slice(0, 2).map((line) => `> ${line}`).join("\n");
-  return `${header}\n${body}\n\n---\n${appendix}\n`;
+  // A machine-readable line at the very end, after any quoted prior deliverable.
+  // The reviewer reads this rather than the first "Measured" string it finds,
+  // which may be an older value quoted in the evidence.
+  const measurement = ctx.measurement
+    ? `\n**Measurement:** ${ctx.metric} = ${ctx.measurement.value} ${ctx.unit} (source: ${ctx.measurement.source})\n`
+    : "";
+  return `${header}\n${body}\n\n---\n${appendix}\n${measurement}`;
 }
 
 function plan(prompt) {
@@ -274,12 +320,24 @@ function review(prompt) {
     /\blatency\b/i,
     /###\s*risks/i,
     /###\s*next step/i,
+    ...(ctx.isMeasurement ? [/measured\s+[^:\n]+:\s*\d/i] : []),
   ];
   const passed = rubric.filter((check) => check.test(deliverable)).length;
   const jitter = Math.floor(rng(hash32(`${ctx.title}:review:${attempt}`))() * 5);
   const score = Math.min(100, 52 + passed * 5 + (attempt > 1 ? 4 : 0) + jitter);
   const verdict = score >= 78 ? "accepted" : "changes_requested";
   const missing = rubric.length - passed;
+  // Read the machine-readable line the simulator appends last. Quoted prior
+  // deliverables in the evidence can carry older "Measured" strings.
+  const measurementMatches = [...deliverable.matchAll(/\*\*Measurement:\*\*\s*[^=\n]+=\s*([\d.]+)\s*([a-z%]*)\s*(?:\(source:\s*([^)]+)\))?/gi)];
+  const measurementMatch = measurementMatches.at(-1);
+  const measurement = ctx.isMeasurement && measurementMatch
+    ? {
+        value: Number(measurementMatch[1]),
+        unit: measurementMatch[2] || ctx.unit,
+        source: measurementMatch[3] || `Deliverable in ${ctx.title}`,
+      }
+    : null;
   return JSON.stringify(
     {
       verdict,
@@ -305,6 +363,7 @@ function review(prompt) {
         },
       ],
       follow_ups: [ctx.next],
+      measurement,
     },
     null,
     2,
@@ -404,10 +463,14 @@ export function simChat({
   signal,
 } = {}) {
   const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n");
-  const lastUser = [...messages].reverse().find((m) => m.role === "user");
-  const prompt = typeof lastUser?.content === "string"
-    ? lastUser.content
-    : (lastUser?.content ?? []).map((part) => part.text ?? "").join("\n");
+  const userMessages = messages.filter((m) => m.role === "user");
+  // A tool hop replaces the last user message with a tool result. The goal
+  // contract is in the original work prompt, so parse the whole conversation:
+  // otherwise the simulated agent would "forget" the metric it was asked to
+  // measure as soon as it called a tool.
+  const prompt = userMessages
+    .map((message) => typeof message.content === "string" ? message.content : (message.content ?? []).map((part) => part.text ?? "").join("\n"))
+    .join("\n\n");
   const wantsJson = responseFormat?.type === "json_object" || responseFormat?.type === "json_schema";
   const renderer = sectionMode(system, prompt, wantsJson);
   const random = rng(hash32(`${seed ?? ""}:${model}:${prompt.slice(0, 200)}`));

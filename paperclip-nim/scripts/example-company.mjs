@@ -127,7 +127,9 @@ console.log(`cycles: ${company.cycleHistory.length}`);
 console.log(`work runs: ${workRuns.length} · accepted ${accepted.length} · rework ${rework.length} · accept rate ${Math.round((accepted.length / Math.max(1, accepted.length + rework.length)) * 100)}%`);
 console.log(`shipped: ${shipped.length}/${issues.length} · artifacts ${company.artifacts.length} · spend ${c(spend)} · ${c(perShipped)} per shipped issue`);
 console.log(`routines: ${company.routines.map((routine) => `${routine.name}: ${routine.runs} runs (every ${routine.cadenceMinutes}m)`).join(", ") || "none"}`);
-console.log(`goal: ${company.goals[0]?.metric} · baseline ${company.goals[0]?.baseline ?? "unmeasured"} → ${company.goals[0]?.target} ${company.goals[0]?.unit ?? ""} · progress ${JSON.stringify(company.goals[0]?.progress)}`);
+const goal = company.goals[0];
+console.log(`goal: ${goal?.metric} · baseline ${goal?.baseline ?? "unmeasured"} → ${goal?.current ?? "unmeasured"} → ${goal?.target} ${goal?.unit ?? ""} · progress ${JSON.stringify(goal?.progress)}`);
+console.log(`measurements: ${goal?.measurements?.length ?? 0}${goal?.measurements?.[0] ? ` · latest ${goal.measurements[0].value} ${goal.measurements[0].unit} (${goal.measurements[0].kind}) from ${goal.measurements[0].issueKey}` : ""}`);
 console.log(`knowledge docs: ${company.knowledge.length} · agent memory: ${company.agents.filter((agent) => (agent.memory ?? []).length).length}/${company.agents.length}`);
 console.log(`ledger rows: ${company.ledger.length} · simulated only: ${company.ledger.every((row) => row.simulated)}`);
 
@@ -155,6 +157,8 @@ const checks = [
   ["skills are distinct per agent", new Set(company.agents.map((agent) => (agent.skills ?? []).sort().join("|"))).size === company.agents.length],
   ["goal metric read from the sentence", !/accepted deliverables/.test(company.goals[0]?.metric ?? "")],
   ["goal has moved", (company.goals[0]?.progress?.accepted ?? 0) > 0],
+  ["goal metric was measured", (company.goals[0]?.measurements?.length ?? 0) > 0],
+  ["measurement came from accepted work", (company.goals[0]?.measurements ?? []).every((entry) => company.issues.find((issue) => issue.id === entry.issueId)?.status === "done")],
   ["a routine fired", company.routines.some((routine) => (routine.runs ?? 0) > 0)],
   ["every issue got at least one run", issues.every((issue) => runs.some((run) => run.issueId === issue.id && run.kind === "work"))],
   ["all issues shipped", shipped.length === issues.length],

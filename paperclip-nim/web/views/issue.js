@@ -46,6 +46,14 @@ export async function render(root, ctx) {
           <div class="row" style="gap:8px;color:var(--red-text);font-size:12.5px">${icon("shield", "nav-icon")}<b>Blocked</b><span style="color:var(--text-2)">${esc(issue.blockedReason)}</span></div>
         </div>` : ""}
 
+        ${issue.measurement ? `<div class="card" style="margin-top:14px">
+          <div class="row-between">
+            <div class="card-title" style="margin:0">Measured ${esc(issue.goal?.metric ?? "metric")}</div>
+            <span class="pill accent">${esc(num(issue.measurement.value))}${issue.measurement.unit ? ` ${esc(issue.measurement.unit)}` : ""}</span>
+          </div>
+          <div class="hint" style="margin-top:6px">${esc(issue.measurement.source)} · ${esc(dateTime(issue.measurement.at))}</div>
+        </div>` : ""}
+
         <div class="card" style="margin-top:14px">
           <div class="row-between" style="margin-bottom:10px">
             <div class="card-title" style="margin:0">Brief</div>

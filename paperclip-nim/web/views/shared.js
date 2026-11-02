@@ -150,7 +150,7 @@ export function goalProgress(goal) {
   // A goal read from the user's sentence can have a target and no baseline yet.
   // Until something is measured, the honest progress is the share of linked
   // work that has been accepted — labelled as such in the UI.
-  if (goal.baseline === null || goal.baseline === undefined) {
+  if (goal.baseline === null || goal.baseline === undefined || goal.current === null || goal.current === undefined) {
     const progress = goal.progress ?? {};
     return Math.max(0, Math.min(1, Number(progress.pct ?? 0) / 100));
   }
@@ -177,7 +177,7 @@ export function goalDirection(goal) {
 
 /** The pill next to the progress bar: a share of work, never a fake number. */
 export function goalPill(goal) {
-  if (goal.baseline === null || goal.baseline === undefined) {
+  if (goal.baseline === null || goal.baseline === undefined || goal.current === null || goal.current === undefined) {
     const progress = goal.progress ?? { accepted: 0, total: 0 };
     return `${progress.accepted ?? 0}/${progress.total ?? 0} accepted`;
   }
@@ -189,6 +189,9 @@ export function goalTarget(goal) {
   const unit = goal.unit ? ` ${goal.unit}` : "";
   if (goal.baseline === null || goal.baseline === undefined) {
     return `target ${num(goal.target)}${unit}`;
+  }
+  if (goal.current === null || goal.current === undefined) {
+    return `baseline ${num(goal.baseline)}${unit} → target ${num(goal.target)}${unit}`;
   }
   return `${num(goal.current)} → ${num(goal.target)}${unit}`;
 }
