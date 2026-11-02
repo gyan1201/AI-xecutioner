@@ -194,6 +194,19 @@ export const BLUEPRINTS = [
       { name: "Dr. Luis Ortega", title: "Peer Reviewer", role: "critic", model: M.super, budget: 900 },
     ],
     goal: { title: "Shortlist 5 binders with predicted affinity under 10 nM", metric: "shortlisted binders", target: 5, baseline: 0 },
+    backlog: [
+      { title: "Define the target and the pharmacophore constraints", priority: "high" },
+      { title: "Generate 200 candidate molecules and predict their complexes", priority: "high" },
+      { title: "Rank the shortlist by predicted affinity and pose plausibility", priority: "high" },
+      { title: "Check ADMET and toxicity flags before nomination", priority: "medium" },
+      { title: "Write the peer-review packet with the method and the caveats", priority: "medium" },
+    ],
+    steps: [
+      "Agree the target, the binding site and what a good candidate has to satisfy.",
+      "Generate candidates and predict structures and affinities for the most promising ones.",
+      "Rank the shortlist and be explicit about the uncertainty in every prediction.",
+      "Run the toxicity and ADMET checks, then hand the packet to peer review.",
+    ],
   }),
   bp({
     id: "genomics",
@@ -201,8 +214,27 @@ export const BLUEPRINTS = [
     category: "Biology",
     summary:
       "Accelerate secondary analysis: align, call variants, and annotate with GPU-accelerated Parabricks, then have agents summarise findings for clinical review.",
-    functions: ["reasoning", "chat", "embedding"],
-    models: [M.ultra, M.embed],
+    functions: ["reasoning", "chat", "embedding", "tools"],
+    models: [M.ultra, M.embed, M.super],
+    team: [
+      { name: "Dr. Sofia Marino", title: "Genomics Pipeline Lead", role: "strategist", model: M.ultra, budget: 3000 },
+      { name: "Chen Wei", title: "Parabricks Engineer", role: "operator", model: M.super, budget: 2200 },
+      { name: "Dr. Omar Farouk", title: "Variant QC Reviewer", role: "critic", model: M.super, budget: 900 },
+    ],
+    goal: { title: "Call and annotate variants in under 30 minutes per sample", metric: "minutes per sample", target: 30, baseline: 180, unit: "min" },
+    backlog: [
+      { title: "Run alignment and variant calling on one sample with Parabricks", priority: "high" },
+      { title: "Annotate variants and filter to clinically actionable calls", priority: "high" },
+      { title: "QC the run: coverage, contamination and duplicate rate", priority: "medium" },
+      { title: "Summarise the report for a genetic counsellor in plain language", priority: "medium" },
+      { title: "Keep the audit trail: reference build, tool versions, parameters", priority: "low" },
+    ],
+    steps: [
+      "Take one consented, de-identified sample through alignment and variant calling.",
+      "Annotate the VCF and separate actionable variants from variants of uncertain significance.",
+      "Produce the QC panel and fail the run if coverage or contamination is out of bounds.",
+      "Write the counsellor summary with the evidence behind every call.",
+    ],
   }),
   bp({
     id: "protein-structure",
@@ -212,6 +244,25 @@ export const BLUEPRINTS = [
       "Predict structures and complexes with Boltz2, score confidence, and compare against known folds. Failures are explained in plain language, not stack traces.",
     functions: ["protein", "reasoning", "vision"],
     models: [M.protein, M.ultra],
+    team: [
+      { name: "Dr. Isabel Duarte", title: "Structural Biology Lead", role: "strategist", model: M.ultra, budget: 2800 },
+      { name: "Nils Berg", title: "Folding Engineer", role: "operator", model: M.protein, budget: 2400 },
+      { name: "Dr. Anika Sharma", title: "Model Validator", role: "critic", model: M.super, budget: 900 },
+    ],
+    goal: { title: "Predict 20 targets with pLDDT above 80", metric: "targets above pLDDT 80", target: 20, baseline: 6 },
+    backlog: [
+      { title: "Prepare sequences and complexes for the first five targets", priority: "high" },
+      { title: "Run Boltz2 predictions and record pLDDT and PAE per target", priority: "high" },
+      { title: "Compare confident regions against known folds", priority: "medium" },
+      { title: "Explain every low-confidence prediction in plain language", priority: "medium" },
+      { title: "Publish the structure report with the model versions used", priority: "low" },
+    ],
+    steps: [
+      "Prepare and validate the input sequences, keeping a record of every modification.",
+      "Run the predictions and store confidence metrics next to each structure.",
+      "Inspect the confident and disordered regions and write what they mean.",
+      "Review the report: no structure ships without a stated confidence band.",
+    ],
   }),
   bp({
     id: "cuopt-routing",
@@ -353,8 +404,27 @@ export const BLUEPRINTS = [
     category: "Healthcare",
     summary:
       "Listen to the visit, draft the note, and route it for clinician sign-off. PHI stays in the audit trail; nothing is written without approval.",
-    functions: ["chat", "safety", "reasoning"],
+    functions: ["chat", "reasoning", "safety", "tools"],
     models: [M.super, M.safety, M.ultra],
+    team: [
+      { name: "Dr. Amara Osei", title: "Clinical Documentation Lead", role: "strategist", model: M.ultra, budget: 3000 },
+      { name: "Ravi Raman", title: "Clinical ASR Engineer", role: "operator", model: M.super, budget: 2200 },
+      { name: "Dr. Lena Vogt", title: "Patient Safety Reviewer", role: "critic", model: M.super, budget: 900 },
+    ],
+    goal: { title: "Cut per-encounter documentation from 12 minutes to under 4", metric: "minutes per encounter", target: 4, baseline: 12, unit: "min" },
+    backlog: [
+      { title: "Transcribe a de-identified encounter with the clinical ASR model", priority: "high" },
+      { title: "Draft a SOAP note where every claim cites a transcript span", priority: "high" },
+      { title: "Redact PHI before any text leaves the encounter boundary", priority: "high" },
+      { title: "Score 50 de-identified encounters against clinician-written notes", priority: "medium" },
+      { title: "Route every draft to clinician sign-off and capture the edits", priority: "medium" },
+    ],
+    steps: [
+      "Record one de-identified encounter and transcribe it, capturing word error rate on the clinical vocabulary.",
+      "Draft the note section by section (S, O, A, P) with a citation for every clinical claim.",
+      "Run the PHI guardrail in and out of the drafting call, and prove nothing identifiable is logged.",
+      "Compare the draft against the clinician's own note, list every omission, and hand it to sign-off.",
+    ],
   }),
   bp({
     id: "medical-imaging",
@@ -362,8 +432,27 @@ export const BLUEPRINTS = [
     category: "Healthcare",
     summary:
       "Triage studies, draft findings, and compare against priors. A radiologist approves every report before it leaves the system.",
-    functions: ["vision", "reasoning", "chat"],
-    models: [M.vl, M.ultra],
+    functions: ["vision", "reasoning", "chat", "safety"],
+    models: [M.vl, M.ultra, M.safety],
+    team: [
+      { name: "Dr. Priya Nair", title: "Radiology AI Lead", role: "strategist", model: M.ultra, budget: 3000 },
+      { name: "Marco Silva", title: "Imaging Pipeline Engineer", role: "operator", model: M.vl, budget: 2200 },
+      { name: "Dr. Hana Ito", title: "Clinical Validator", role: "critic", model: M.super, budget: 900 },
+    ],
+    goal: { title: "Draft chest X-ray findings in under 10 minutes, signed off by a radiologist", metric: "report turnaround", target: 10, baseline: 45, unit: "min" },
+    backlog: [
+      { title: "DICOM preflight: parse, validate and de-identify an incoming series", priority: "high" },
+      { title: "Draft findings with the image region behind each statement", priority: "high" },
+      { title: "Compare with the prior study and flag interval change", priority: "medium" },
+      { title: "Measure agreement against 100 signed radiologist reports", priority: "high" },
+      { title: "Capture radiologist accept / edit / reject reasons on every report", priority: "medium" },
+    ],
+    steps: [
+      "Push one de-identified study through DICOM preflight and record what was stripped.",
+      "Draft findings for the study, keeping every sentence tied to a region or a prior.",
+      "Score the draft against the signed report: agreement, over-calls, and missed findings.",
+      "Hand the report to radiologist sign-off and capture the edit that was made.",
+    ],
   }),
   bp({
     id: "content-factory",

@@ -72,14 +72,19 @@ export function createIssue(company, overrides = {}) {
 }
 
 export function createGoal(overrides = {}) {
+  const baseline = overrides.baseline ?? 0;
+  const target = overrides.target ?? 100;
   return {
     id: overrides.id ?? newId("goal"),
     title: overrides.title ?? "New goal",
     description: overrides.description ?? "",
     metric: overrides.metric ?? "",
     unit: overrides.unit ?? "",
-    baseline: overrides.baseline ?? 0,
-    target: overrides.target ?? 100,
+    baseline,
+    target,
+    // "Minutes per encounter" improves downward, "notes signed" upward. Infer
+    // it from the numbers so a goal authored as 12 → 4 is read correctly.
+    direction: overrides.direction ?? (Number(target) < Number(baseline) ? "decrease" : "increase"),
     current: overrides.current ?? 0,
     ownerId: overrides.ownerId ?? null,
     status: overrides.status ?? "active",

@@ -172,7 +172,9 @@ function renderChrome() {
   modeChip.title =
     mode === "live"
       ? `Calling ${config.baseUrl} with key ${config.keyHint}`
-      : "No NVIDIA key — every model call is served by the deterministic simulator. Add a key in Settings.";
+      : config?.keyPresent
+        ? `Key ${config.keyHint} saved but not verified — every model call is served by the deterministic simulator. Verify it in Settings to go live.`
+        : "No NVIDIA key — every model call is served by the deterministic simulator. Add a key in Settings.";
 
   const companyName = state.company?.name ?? "Paperclip";
   const crumbs = [`<a href="#/dashboard">${esc(companyName)}</a>`];

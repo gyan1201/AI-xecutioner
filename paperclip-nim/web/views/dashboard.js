@@ -1,5 +1,5 @@
 import { api, ago, avatar, bars, esc, icon, md, money, num, pct } from "../lib.js";
-import { agentChip, emptyState, goalProgress, issueRow, modelPill, pageHeader, spendBar } from "./shared.js";
+import { agentChip, emptyState, goalDirection, goalProgress, issueRow, modelPill, pageHeader, spendBar } from "./shared.js";
 
 export const title = "Dashboard";
 
@@ -31,9 +31,13 @@ export async function render(root, ctx) {
         <div class="row-between" style="gap:14px;flex-wrap:wrap">
           <div class="row" style="gap:10px">
             <span class="pill accent"><span class="dot"></span>Simulation</span>
-            <span style="font-size:12.5px;color:var(--text-2)">No NVIDIA key configured. Every model call is served locally so the agents, ledger, guardrails and blueprints stay fully explorable.</span>
+            <span style="font-size:12.5px;color:var(--text-2)">${
+              config?.keyPresent
+                ? `Key ${esc(config.keyHint ?? "")} is saved but not verified from this host, so every model call is served locally. Verify it in Settings to go live — the company, board and ledger are already real.`
+                : "No NVIDIA key configured. Every model call is served locally so the agents, ledger, guardrails and blueprints stay fully explorable."
+            }</span>
           </div>
-          <button class="btn sm" data-action="settings">Add a key</button>
+          <button class="btn sm" data-action="settings">${config?.keyPresent ? "Open settings" : "Add a key"}</button>
         </div>
       </div>` : ""}
 
@@ -79,12 +83,13 @@ export async function render(root, ctx) {
           <div style="font-size:14px;font-weight:550;line-height:1.4;margin-bottom:8px">${esc(primaryGoal.title)}</div>
           <div class="progress" style="height:6px"><i style="width:${Math.round(progress * 100)}%"></i></div>
           <div class="row-between" style="margin-top:8px">
-            <span style="font-size:12px;color:var(--text-2)">${num(primaryGoal.current)} / ${num(primaryGoal.target)} ${esc(primaryGoal.unit ?? "")}</span>
+            <span style="font-size:12px;color:var(--text-2)">${num(primaryGoal.current)} → ${num(primaryGoal.target)} ${esc(primaryGoal.unit ?? "")}</span>
             <span class="pill accent">${Math.round(progress * 100)}%</span>
           </div>
           <div class="row" style="gap:8px;margin-top:12px">
             <span class="tag">${esc(primaryGoal.metric || "metric")}</span>
             <span class="tag">baseline ${num(primaryGoal.baseline)}</span>
+            <span class="tag">${goalDirection(primaryGoal)}</span>
           </div>
           <div class="hint" style="margin-top:10px">Owned by ${esc(company.agents.find((agent) => agent.id === primaryGoal.ownerId)?.name ?? "unassigned")} · due ${primaryGoal.dueAt ? new Date(primaryGoal.dueAt).toLocaleDateString() : "—"}</div>
         ` : `<div class="hint">No goal yet.</div>`}

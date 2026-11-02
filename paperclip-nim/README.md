@@ -129,6 +129,8 @@ From `build.nvidia.com/blueprints`: AI-Q research assistant, DocsFab, RAG with N
 
 Each blueprint ships a team (names, titles, roles, models, budgets), a goal with a real metric, a backlog with acceptance criteria, and a pipeline trace of the NIM functions it needs. **Deploy** turns it into a staffed company with a goal, a board and — optionally — an immediate first cycle.
 
+The five healthcare and biology blueprints — ambient clinical scribe, medical imaging, genomics, drug discovery, protein structure — are written out in full: real clinician names and titles, a domain goal with a unit and a baseline (12 → 4 minutes per encounter), and a five-issue backlog that names the actual work (ASR transcripts, SOAP notes with transcript citations, PHI redaction, DICOM preflight, interval-change flags, pLDDT thresholds). Deploying `ambient-clinical` onto a company whose mission is the documentation goal produces Dr. Amara Osei and two engineers, not a Blueprint Lead placeholder. Goals also carry a direction, so a metric that improves downward is scored correctly instead of showing 300%.
+
 ---
 
 ## The product

@@ -147,9 +147,22 @@ export function modelPill(modelId) {
 }
 
 export function goalProgress(goal) {
-  const span = (Number(goal.target) || 0) - (Number(goal.baseline) || 0);
-  const progress = span === 0 ? (goal.current >= goal.target ? 1 : 0) : (goal.current - goal.baseline) / span;
-  return Math.max(0, Math.min(1, progress));
+  const baseline = Number(goal.baseline) || 0;
+  const target = Number(goal.target) || 0;
+  const current = Number(goal.current) || 0;
+  const descending = (goal.direction ?? (target < baseline ? "decrease" : "increase")) === "decrease";
+  // Distance closed between where we started and where we want to be. Without
+  // this, a "12 minutes → 4 minutes" goal reads as 300% on day one and 0%.
+  const span = descending ? baseline - target : target - baseline;
+  const moved = descending ? baseline - current : current - baseline;
+  if (span === 0) return (descending ? current <= target : current >= target) ? 1 : 0;
+  return Math.max(0, Math.min(1, moved / span));
+}
+
+export function goalDirection(goal) {
+  const baseline = Number(goal.baseline) || 0;
+  const target = Number(goal.target) || 0;
+  return (goal.direction ?? (target < baseline ? "decrease" : "increase")) === "decrease" ? "lower is better" : "higher is better";
 }
 
 export function emptyState({ title, body, action = "" }) {

@@ -18,6 +18,7 @@ delete process.env.NIM_API_KEY;
 
 const { createRuntime } = await import("../server/runtime.mjs");
 const { createApp } = await import("../server/routes.mjs");
+const { goalProgress } = await import("../web/views/shared.js");
 
 const runtime = createRuntime({ logger: { log() {}, warn() {}, error() {} } });
 runtime.service.ensureSeed();
@@ -419,6 +420,7 @@ test("agencies: agents, skills, goals, projects, routines and knowledge all muta
 
   const goal = await post(`/api/companies/${companyId}/goals`, { title: "Cut time-to-value", metric: "minutes", baseline: 24, current: 24, target: 8, unit: "min" });
   assert.equal(goal.status, 200);
+  assert.equal(goal.body.goal.direction, "decrease", "a 24 → 8 goal improves downward");
   const project = await post(`/api/companies/${companyId}/projects`, { name: "Activation", description: "Day three", color: "#76b900" });
   assert.equal(project.status, 200);
   const routine = await post(`/api/companies/${companyId}/routines`, {
@@ -468,6 +470,55 @@ test("a blueprint deploys a staffed team and a backlog", async () => {
   }
   const deployedGoal = deployed.body.company.goals[0];
   assert.ok(deployedGoal?.title, "deploy should record a goal");
+});
+
+test("deploying a healthcare blueprint yields a clinical team, not placeholders", async () => {
+  const created = await post("/api/companies", {
+    name: "Clinic Two",
+    mission: "Cut clinician documentation time from 12 minutes to under 4 per encounter.",
+  });
+  const companyId2 = created.body.company.id;
+  const deployed = await post(`/api/companies/${companyId2}/blueprints/ambient-clinical`, {});
+  assert.equal(deployed.status, 200);
+  const company = deployed.body.company;
+  const names = company.agents.map((agent) => agent.name);
+  assert.equal(names.some((name) => /^(Blueprint Lead|Builder|Reviewer)$/.test(name)), false, "no template names");
+  assert.ok(company.agents.every((agent) => (agent.skills ?? []).length >= 1), "each agent gets NVIDIA skills");
+  assert.ok(company.issues.some((issue) => /PHI/i.test(issue.title)), "the backlog is the blueprint's domain work");
+  assert.match(company.goals[0].title, /documentation/i, "the goal comes from the company mission");
+  assert.equal(company.goals[0].unit, "min");
+  assert.equal(company.goals[0].direction, "decrease", "12 min → 4 min is a downward metric");
+  assert.equal(company.goals[0].ownerId, company.agents[0].id, "the lead who owns the goal owns it");
+});
+
+test("a second blueprint joins the goal instead of forking or stealing it", async () => {
+  const created = await post("/api/companies", {
+    name: "Clinic Three",
+    mission: "Cut clinician documentation time from 12 minutes to under 4 per encounter.",
+  });
+  const companyId3 = created.body.company.id;
+  const scribe = await post(`/api/companies/${companyId3}/blueprints/ambient-clinical`, {});
+  assert.equal(scribe.status, 200);
+  const firstGoal = scribe.body.company.goals.find((goal) => goal.status === "active");
+  const firstOwner = firstGoal.ownerId;
+  const imaging = await post(`/api/companies/${companyId3}/blueprints/medical-imaging`, {});
+  assert.equal(imaging.status, 200);
+  const activeGoals = imaging.body.company.goals.filter((goal) => goal.status === "active");
+  assert.equal(activeGoals.length, 1, "one company, one active goal");
+  assert.equal(activeGoals[0].id, firstGoal.id);
+  assert.equal(activeGoals[0].ownerId, firstOwner, "hiring a second pod must not hand over the goal");
+  assert.equal(activeGoals[0].metric, "minutes per encounter", "the blueprint metric survives the merge");
+  assert.equal(imaging.body.company.issues.filter((issue) => /^lock the metric and baseline/i.test(issue.title)).length <= 1, true);
+});
+
+test("goal progress understands metrics that improve downward", () => {
+  const goal = { baseline: 12, current: 12, target: 4 };
+  assert.equal(goalProgress(goal), 0, "starting at the baseline is zero percent");
+  assert.equal(goalProgress({ ...goal, current: 8 }), 0.5, "halfway from 12 to 4");
+  assert.equal(goalProgress({ ...goal, current: 4 }), 1, "hitting the target is done");
+  assert.equal(goalProgress({ ...goal, current: 3 }), 1, "beating the target does not overflow");
+  assert.equal(goalProgress({ baseline: 0, current: 50, target: 100 }), 0.5, "upward goals still work");
+  assert.equal(goalProgress({ baseline: 0, current: 0, target: 100 }), 0);
 });
 
 test("a new company can be created from scratch and from a blueprint", async () => {

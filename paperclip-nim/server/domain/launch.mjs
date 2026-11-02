@@ -94,9 +94,119 @@ function realName(blueprintId, index, taken) {
 }
 
 /**
- * A complete plan for a launch: blueprint, goal, team and backlog, written
- * around the user's goal rather than the blueprint's demo copy.
+ * A complete plan for one blueprint, written around a company's own goal.
+ *
+ * Used by two callers, which is why it takes a blueprint rather than an id:
+ * the full-auto launcher (goal → ranked blueprint → plan) and
+ * `service.deployBlueprint` (a specific blueprint → plan), so deploying a
+ * blueprint by hand produces the same real names, skills and goal-grounded
+ * backlog as a launch instead of template placeholders.
  */
+export function planFromBlueprint(blueprint, { companyName = "", goal = "", issuePrefix = "CO" } = {}) {
+  if (!blueprint) {
+    const error = new Error("Unknown blueprint");
+    error.status = 404;
+    error.code = "unknown_blueprint";
+    throw error;
+  }
+  const plan = planBlueprint(blueprint.id, { issuePrefix });
+  const brief = String(goal ?? "").trim();
+  const title = brief ? goalTitle(brief) : plan.goal.title;
+  const context = brief || blueprint.summary;
+  const functions = (blueprint.functions ?? []).join(", ");
+
+  // Team: keep the blueprint's roles/models, replace template names, and give
+  // every agent two NVIDIA skills that match what the company actually does.
+  const taken = new Set();
+  const skillText = `${blueprint.name} ${blueprint.category} ${blueprint.summary} ${functions} ${brief}`;
+  const agents = plan.agents.map((agent, index) => {
+    const named = GENERIC_NAMES.has(agent.name) ? realName(blueprint.id, index, taken) : agent.name;
+    taken.add(named);
+    return {
+      ...agent,
+      name: named,
+      description: `${agent.title} at ${companyName || "this company"}.`,
+      skills: suggestSkills({ text: skillText, limit: 2 }).map((skill) => skill.id).slice(0, 2),
+      instructions: [
+        agent.instructions,
+        `Company goal: ${clip(context, 400)}`,
+        "Every deliverable must move that goal, cite its evidence, and define how it is checked. If a request does not move the goal, say so and stop.",
+      ].join("\n\n"),
+    };
+  });
+
+  const strategist = agents.find((agent) => agent.role === "strategist") ?? agents[0];
+  const operator = agents.find((agent) => agent.role === "operator") ?? agents[1] ?? agents[0];
+  const critic = agents.find((agent) => agent.role === "critic") ?? agents[agents.length - 1];
+  const indexOf = (agent) => Math.max(agents.indexOf(agent), 0);
+  const goalLine = clip(context, 400);
+  const labels = [blueprint.category.toLowerCase().replace(/[^a-z0-9]+/g, "-"), "full-auto"];
+
+  // Backlog: the decisions only the goal can settle, then the blueprint's own
+  // concrete steps, then a review gate that defines done.
+  const composed = [
+    {
+      title: `Lock the metric and baseline for: ${clip(title, 96)}`,
+      priority: "urgent",
+      description: `This team exists to ${goalLine ? `achieve this: ${goalLine}` : `deliver ${blueprint.name}`}. Pick the single number that proves progress, write down today's value with its source, and say how often it is measured. Blueprint metric: ${plan.goal.metric} ${plan.goal.target}${plan.goal.unit ? ` ${plan.goal.unit}` : ""}.`,
+      acceptance: ["Metric named with an exact definition", "Baseline value with a source and a date", "Owner and measurement cadence agreed"],
+      labels: ["foundation", ...labels],
+      ownerIndex: indexOf(strategist),
+      source: "blueprint",
+    },
+    ...plan.issues
+      // "scope and success metric" is the issue composed above.
+      .filter((issue) => !/scope and success metric/i.test(issue.title))
+      .slice(0, 5)
+      .map((issue, index) => ({
+        ...issue,
+        title: clip(issue.title, 140),
+        priority: issue.priority ?? (index === 0 ? "high" : "medium"),
+        description: `${issue.description}\n\nGoal this serves: ${goalLine}`,
+        labels: [...(issue.labels ?? []).slice(0, 2), ...labels],
+        ownerIndex: issue.ownerIndex ?? indexOf(operator),
+        source: issue.source ?? "blueprint",
+      })),
+    {
+      title: `Wire the ${clip(functions || "NIM", 60)} calls behind one client`,
+      priority: "high",
+      description: `Stand up one OpenAI-compatible client for the ${blueprint.name} stack and prove each endpoint family works: ${functions || "chat"}. Record latency and cost per call so the ledger is real from the first run.`,
+      acceptance: ["Model chosen per task with a written reason", "One smoke call per endpoint, logged with cost", "Failure path returns a usable error, not a silent retry"],
+      labels: ["nim", ...labels],
+      ownerIndex: indexOf(operator),
+      source: "blueprint",
+    },
+    {
+      title: `Ship the first end-to-end slice and review it`,
+      priority: "high",
+      description: `Run one real input through the ${blueprint.name} pipeline, capture the output, its cost and its latency, then have ${critic.name} accept or reject it against the acceptance criteria above. Accepted is the only definition of done.`,
+      acceptance: ["One real input → output shown in the issue", "Cost and latency recorded on the run", "Reviewer verdict linked, with the next action named"],
+      labels: ["delivery", ...labels],
+      ownerIndex: indexOf(critic),
+      source: "blueprint",
+    },
+  ];
+
+  return {
+    blueprint: {
+      id: blueprint.id,
+      name: blueprint.name,
+      summary: blueprint.summary,
+      category: blueprint.category,
+      functions: blueprint.functions,
+    },
+    goal: {
+      ...plan.goal,
+      title,
+      description: context,
+      metric: plan.goal.metric || "accepted deliverables",
+    },
+    agents,
+    issues: composed,
+  };
+}
+
+/** Goal → ranked blueprint → plan. The full-auto entry point. */
 export function planForGoal({ name, goal, blueprintId = null } = {}) {
   const companyName = clip(name, 80) || "New company";
   const brief = String(goal ?? "").trim();
@@ -118,102 +228,10 @@ export function planForGoal({ name, goal, blueprintId = null } = {}) {
     throw error;
   }
 
-  const plan = planBlueprint(blueprint.id, { issuePrefix: issuePrefixFor(companyName) });
-  const title = goalTitle(brief || blueprint.goal.title);
-  const context = brief || blueprint.summary;
-  const functions = (blueprint.functions ?? []).join(", ");
-
-  // Team: keep the blueprint's roles/models, replace template names, and give
-  // every agent two NVIDIA skills that match what the company actually does.
-  const taken = new Set();
-  const skillText = `${blueprint.name} ${blueprint.category} ${blueprint.summary} ${functions} ${brief}`;
-  const agents = plan.agents.map((agent, index) => {
-    const named = GENERIC_NAMES.has(agent.name) ? realName(blueprint.id, index, taken) : agent.name;
-    taken.add(named);
-    return {
-      ...agent,
-      name: named,
-      description: `${agent.title} at ${companyName}.`,
-      skills: suggestSkills({ text: skillText, limit: 2, category: "" }).map((skill) => skill.id).slice(0, 2),
-      instructions: [
-        agent.instructions,
-        `Company goal: ${clip(context, 400)}`,
-        "Every deliverable must move that goal, cite its evidence, and define how it is checked. If a request does not move the goal, say so and stop.",
-      ].join("\n\n"),
-    };
-  });
-
-  const strategist = agents.find((agent) => agent.role === "strategist") ?? agents[0];
-  const operator = agents.find((agent) => agent.role === "operator") ?? agents[1] ?? agents[0];
-  const critic = agents.find((agent) => agent.role === "critic") ?? agents[agents.length - 1];
-  const indexOf = (agent) => Math.max(agents.indexOf(agent), 0);
-  const goalLine = clip(brief || blueprint.summary, 400);
-  const labels = [blueprint.category.toLowerCase().replace(/[^a-z0-9]+/g, "-"), "full-auto"];
-
-  // Backlog: the first two issues are the decisions only the goal can settle,
-  // then the concrete build steps this blueprint needs, then the review gate.
-  const composed = [
-    {
-      title: `Lock the metric and baseline for: ${clip(title, 96)}`,
-      priority: "urgent",
-      description: `The company exists to ${goalLine ? `achieve this: ${goalLine}` : "hit its goal"}. Pick the single number that proves progress, write down today's value with its source, and say how often it is measured. Goal in the tracker: ${plan.goal.metric} ${plan.goal.target}${plan.goal.unit ? ` ${plan.goal.unit}` : ""}.`,
-      acceptance: ["Metric named with an exact definition", "Baseline value with a source and a date", "Owner and measurement cadence agreed"],
-      labels: ["foundation", ...labels],
-      ownerIndex: indexOf(strategist),
-      source: "full-auto",
-    },
-    {
-      title: `Wire the ${clip(functions || "NIM", 60)} calls behind one client`,
-      priority: "high",
-      description: `Stand up one OpenAI-compatible client for the ${blueprint.name} stack and prove each endpoint family works: ${functions || "chat"}. Record latency and cost per call so the ledger is real from the first run.`,
-      acceptance: ["Model chosen per task with a written reason", "One smoke call per endpoint, logged with cost", "Failure path returns a usable error, not a silent retry"],
-      labels: ["nim", ...labels],
-      ownerIndex: indexOf(operator),
-      source: "full-auto",
-    },
-    ...plan.issues
-      // The blueprint's own boilerplate "scope and success metric" step is the
-      // issue composed above; shipping both would be duplicate work.
-      .filter((issue) => !/scope and success metric/i.test(issue.title))
-      .slice(0, 4)
-      .map((issue, index) => ({
-      ...issue,
-      title: clip(issue.title, 140),
-      priority: index === 0 ? "high" : issue.priority ?? "medium",
-      description: `${issue.description}\n\nGoal this serves: ${goalLine}`,
-      labels: [...(issue.labels ?? []).slice(0, 2), "full-auto"],
-      ownerIndex: issue.ownerIndex ?? indexOf(operator),
-      source: "full-auto",
-    })),
-    {
-      title: `Ship the first end-to-end slice and review it`,
-      priority: "high",
-      description: `Run one real input through the ${blueprint.name} pipeline, capture the output, its cost and its latency, then have ${critic.name} accept or reject it against the acceptance criteria above. Accepted is the only definition of done.`,
-      acceptance: ["One real input → output shown in the issue", "Cost and latency recorded on the run", "Reviewer verdict linked, with the next action named"],
-      labels: ["delivery", ...labels],
-      ownerIndex: indexOf(critic),
-      source: "full-auto",
-    },
-  ];
-
   return {
+    ...planFromBlueprint(blueprint, { companyName, goal: brief, issuePrefix: issuePrefixFor(companyName) }),
     source: blueprintId ? "selected" : match.reason === "matched" ? "matched" : "default",
-    blueprint: {
-      id: blueprint.id,
-      name: blueprint.name,
-      summary: blueprint.summary,
-      category: blueprint.category,
-      functions: blueprint.functions,
-    },
     match,
-    goal: {
-      ...plan.goal,
-      title,
-      description: context,
-      metric: plan.goal.metric || "accepted deliverables",
-    },
-    agents,
-    issues: composed,
   };
 }
 

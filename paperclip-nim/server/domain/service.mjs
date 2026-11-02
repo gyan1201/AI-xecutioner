@@ -33,6 +33,7 @@ import {
   slugify,
 } from "./model.mjs";
 import { searchKnowledge } from "./retrieval.mjs";
+import { planFromBlueprint } from "./launch.mjs";
 
 function httpError(message, status = 400, code = "bad_request") {
   const error = new Error(message);
@@ -57,6 +58,15 @@ function optionalNumber(value, field, { min = -1e12, max = 1e12 } = {}) {
 
 export function createService({ store, nim, engine, bus }) {
   /* -------------------------------------------------------------- seeding */
+
+  /** Two NVIDIA skills whose text matches the role, so no agent starts empty-handed. */
+  function skillsFor(text, limit = 2) {
+    try {
+      return suggestSkills({ text, limit }).map((skill) => skill.id).slice(0, limit);
+    } catch {
+      return [];
+    }
+  }
 
   /** A share of the company cap, or 0 (unlimited) when the company is unlimited. */
   function shareOfCap(capCents, share) {
@@ -283,6 +293,7 @@ export function createService({ store, nim, engine, bus }) {
       description: "Sets the cycle focus and owns the goal.",
       instructions: "Turn the company goal into a ranked, dependency-aware plan. Never assign work without a definition of done.",
       capabilities: ["reasoning", "chat", "tools"],
+      skills: skillsFor("strategy planning roadmap prioritisation reasoning"),
       accent: "#76b900",
     });
     const operator = createAgent({
@@ -295,6 +306,7 @@ export function createService({ store, nim, engine, bus }) {
       description: "Produces the deliverables.",
       instructions: "Produce work a reviewer can accept: the change, the metric, the evidence, the rollback.",
       capabilities: ["chat", "tools", "vision"],
+      skills: skillsFor("delivery implementation build pipeline deployment"),
       accent: "#4ec9b0",
     });
     const critic = createAgent({
@@ -307,6 +319,7 @@ export function createService({ store, nim, engine, bus }) {
       description: "Accepts work or sends it back with the exact fix.",
       instructions: "Judge against acceptance criteria only. Reply with JSON. Be hard to impress and specific.",
       capabilities: ["reasoning", "chat"],
+      skills: skillsFor("quality review evaluation safety testing"),
       accent: "#ff7b72",
     });
     company.agents = [ceo, operator, critic];
@@ -446,8 +459,31 @@ export function createService({ store, nim, engine, bus }) {
   }
 
   function deployPlan(company, plan, { actorId = "human" } = {}) {
-    const goal = createGoal({ ...plan.goal, ownerId: null, description: plan.goal.description ?? "" });
-    company.goals.unshift(goal);
+    // Deploying a second blueprint into the same company must not fork the
+    // goal: issues join the active goal with the same title instead. Compare on
+    // the sentence, not the punctuation — "…per encounter" and "…per encounter."
+    // are the same goal.
+    const goalKey = (title) => String(title ?? "").trim().toLowerCase().replace(/[.!?\s]+$/, "");
+    const existingGoal = company.goals.find(
+      (entry) => entry.status === "active" && goalKey(entry.title) === goalKey(plan.goal.title),
+    );
+    const goal = existingGoal ?? createGoal({ ...plan.goal, ownerId: null, description: plan.goal.description ?? "" });
+    if (existingGoal) {
+      // A goal created with the starter team is only a placeholder ("accepted
+      // deliverables"); the blueprint knows the real metric and unit.
+      const generic = !existingGoal.metric || existingGoal.metric === "accepted deliverables";
+      if (generic && plan.goal.metric) {
+        existingGoal.metric = plan.goal.metric;
+        existingGoal.unit = plan.goal.unit ?? existingGoal.unit ?? "";
+        existingGoal.target = plan.goal.target ?? existingGoal.target;
+        existingGoal.baseline = plan.goal.baseline ?? existingGoal.baseline;
+        existingGoal.direction =
+          plan.goal.direction ??
+          (Number(existingGoal.target) < Number(existingGoal.baseline) ? "decrease" : "increase");
+      }
+    } else {
+      company.goals.unshift(goal);
+    }
     const project = createProject({
       name: plan.blueprint.name,
       description: plan.blueprint.summary,
@@ -467,9 +503,15 @@ export function createService({ store, nim, engine, bus }) {
     if (existingLead && agents[0]) agents[0].reportsTo = existingLead.id;
     for (const agent of agents.slice(1)) if (agents[0]) agent.reportsTo = agents[0].id;
     company.agents.push(...agents);
-    goal.ownerId = agents[0]?.id ?? existingLead?.id ?? null;
+    // The goal belongs to whoever it was created for: hiring a second pod must
+    // not quietly hand the company goal to the newest lead.
+    goal.ownerId = goal.ownerId ?? agents[0]?.id ?? existingLead?.id ?? null;
 
-    const issues = plan.issues.map((spec) =>
+    // A goal that already exists already owns the "lock the metric" decision.
+    const issueSpecs = existingGoal
+      ? plan.issues.filter((spec) => !/^lock the metric and baseline/i.test(spec.title))
+      : plan.issues;
+    const issues = issueSpecs.map((spec) =>
       createIssue(company, {
         title: spec.title,
         description: spec.description,
@@ -491,7 +533,15 @@ export function createService({ store, nim, engine, bus }) {
   async function deployBlueprint(companyId, blueprintId) {
     const company = store.getCompany(companyId);
     if (!company) throw httpError("Company not found", 404, "not_found");
-    const plan = planBlueprint(blueprintId, { issuePrefix: company.issuePrefix });
+    const blueprint = getBlueprint(blueprintId);
+    if (!blueprint) throw httpError(`Unknown blueprint: ${blueprintId}`, 404, "unknown_blueprint");
+    // Same planner the launcher uses: real names, matched skills, and a backlog
+    // written around this company's goal instead of the blueprint's demo copy.
+    const plan = planFromBlueprint(blueprint, {
+      companyName: company.name,
+      goal: company.mission,
+      issuePrefix: company.issuePrefix,
+    });
     const created = deployPlan(company, plan, { actorId: "human" });
     pushActivity(company, {
       kind: "blueprint.deployed",
@@ -823,6 +873,13 @@ export function createService({ store, nim, engine, bus }) {
     if (payload.target !== undefined) goal.target = optionalNumber(payload.target, "target") ?? goal.target;
     if (payload.current !== undefined) goal.current = optionalNumber(payload.current, "current") ?? goal.current;
     if (payload.ownerId !== undefined) goal.ownerId = payload.ownerId || null;
+    if (payload.direction !== undefined) {
+      goal.direction = payload.direction === "decrease" ? "decrease" : "increase";
+    } else if (payload.baseline !== undefined || payload.target !== undefined) {
+      // The numbers are the truth: 24 → 8 improves downward even if the goal was
+      // first created with only a title. An explicit `direction` is never inferred.
+      goal.direction = Number(goal.target) < Number(goal.baseline) ? "decrease" : "increase";
+    }
     if (payload.status !== undefined) goal.status = String(payload.status);
     recomputeCompany(company);
     store.saveCompany(company);
