@@ -71,6 +71,9 @@ export function createIssue(company, overrides = {}) {
     spendCents: overrides.spendCents ?? 0,
     dueAt: overrides.dueAt ?? null,
     source: overrides.source ?? "human",
+    // Set only when an accepted run reports a measured value for the goal's
+    // metric. The engine writes it; the model cannot claim a number.
+    measurement: overrides.measurement ?? null,
   };
 }
 
@@ -78,7 +81,7 @@ export function createGoal(overrides = {}) {
   // A goal read out of a sentence often has a target but no baseline yet — the
   // baseline is measured by the first run. Keep that "unknown" as null instead
   // of pretending it is zero, which would invent progress that never happened.
-  const baseline = overrides.baseline === null ? null : overrides.baseline ?? 0;
+  const baseline = overrides.baseline === null || overrides.baseline === "" ? null : overrides.baseline ?? 0;
   const target = overrides.target ?? 100;
   return {
     id: overrides.id ?? newId("goal"),
@@ -91,8 +94,11 @@ export function createGoal(overrides = {}) {
     // "Minutes per encounter" improves downward, "notes signed" upward. Infer
     // it from the numbers so a goal authored as 12 → 4 is read correctly.
     direction: overrides.direction ?? (baseline === null ? "decrease" : Number(target) < Number(baseline) ? "decrease" : "increase"),
-    current: overrides.current ?? (baseline === null ? null : 0),
+    current: overrides.current ?? (baseline === null ? null : baseline),
     progress: overrides.progress ?? { accepted: 0, total: 0, pct: 0 },
+    // Measured values, newest first. Written only by the engine when an
+    // accepted run reports one, so the metric is evidence, not an assertion.
+    measurements: overrides.measurements ?? [],
     ownerId: overrides.ownerId ?? null,
     status: overrides.status ?? "active",
     dueAt: overrides.dueAt ?? null,
@@ -259,6 +265,128 @@ export function agentSpendStatus(company, agent) {
   };
 }
 
+const UNIT_ALIASES = {
+  ms: "ms",
+  millisecond: "ms",
+  milliseconds: "ms",
+  s: "s",
+  sec: "s",
+  secs: "s",
+  second: "s",
+  seconds: "s",
+  min: "min",
+  mins: "min",
+  minute: "min",
+  minutes: "min",
+  h: "h",
+  hr: "h",
+  hrs: "h",
+  hour: "h",
+  hours: "h",
+  d: "d",
+  day: "d",
+  days: "d",
+  w: "w",
+  wk: "w",
+  wks: "w",
+  week: "w",
+  weeks: "w",
+  "%": "%",
+  percent: "%",
+  percentage: "%",
+  usd: "usd",
+  $: "usd",
+  dollars: "usd",
+  dollar: "usd",
+};
+
+/** "minutes" and "min" are the same unit; a reviewer is not punished for prose. */
+export function normalizeUnit(unit, fallback = "") {
+  const raw = String(unit ?? "").trim().toLowerCase();
+  if (!raw) return fallback;
+  return UNIT_ALIASES[raw] ?? raw;
+}
+
+/**
+ * Distance closed between the baseline and the target, 0..1. Returns null when
+ * the goal has no baseline or no measurement yet — an unmeasured goal has no
+ * metric progress to show, only the share of accepted work.
+ */
+export function goalMetricProgress(goal) {
+  if (!goal || goal.baseline === null || goal.baseline === undefined) return null;
+  if (goal.current === null || goal.current === undefined) return null;
+  const baseline = Number(goal.baseline);
+  const target = Number(goal.target);
+  const current = Number(goal.current);
+  if (![baseline, target, current].every(Number.isFinite)) return null;
+  const span = target - baseline;
+  if (span === 0) return current === target ? 1 : 0;
+  return Math.max(0, Math.min(1, (current - baseline) / span));
+}
+
+/** Refresh the derived metric fields on one goal. */
+export function recomputeGoal(goal) {
+  if (!goal) return goal;
+  goal.progress = goal.progress ?? { accepted: 0, total: 0, pct: 0 };
+  const metric = goalMetricProgress(goal);
+  goal.progress.metricPct = metric === null ? null : Math.round(metric * 100);
+  goal.progress.measuredAt = goal.measurements?.[0]?.at ?? null;
+  return goal;
+}
+
+/**
+ * Record a measured value for a goal's metric.
+ *
+ * The reviewer is the only writer: it returns `measurement` in its verdict, and
+ * the engine calls this on an accepted issue. A baseline issue (the one that
+ * goes and measures the unmeasured starting point) sets `baseline`; every other
+ * accepted measurement moves `current`. Invalid values, a unit that does not
+ * match the goal, and measurements on work that was not accepted are ignored.
+ */
+export function recordGoalMeasurement(company, goal, issue, measurement, run, agent) {
+  if (!goal || !issue || !measurement) return null;
+  const value = Number(measurement.value);
+  if (!Number.isFinite(value)) return null;
+  const goalUnit = normalizeUnit(goal.unit);
+  const unit = normalizeUnit(measurement.unit, goalUnit);
+  if (goalUnit && unit && goalUnit !== unit) return null;
+  // Count goals ("accepted deliverables") are computed from accepted work.
+  // A number measured against them is not the goal's metric.
+  if (!goal.unit || goal.unit === "issues" || /deliverable/i.test(goal.metric ?? "")) return null;
+
+  const hasBaseline = goal.baseline !== null && goal.baseline !== undefined;
+  const isBaselineIssue = /baseline|starting point|today'?s value|current value/i.test(`${issue.title} ${issue.description}`);
+  // Without a baseline, only the issue that measures the starting point can
+  // set one. A random deliverable mentioning a number must not define the goal.
+  if (!hasBaseline && !isBaselineIssue) return null;
+
+  const entry = {
+    id: newId("msr"),
+    value,
+    unit: unit || goalUnit,
+    source: String(measurement.source ?? "").trim().slice(0, 200) || `${issue.key} deliverable`,
+    at: nowIso(),
+    issueId: issue.id,
+    issueKey: issue.key,
+    runId: run?.id ?? null,
+    agentId: agent?.id ?? null,
+    kind: !hasBaseline && isBaselineIssue ? "baseline" : "current",
+  };
+  goal.measurements = goal.measurements ?? [];
+  goal.measurements.unshift(entry);
+  if (goal.measurements.length > 20) goal.measurements.length = 20;
+  if (entry.kind === "baseline") {
+    goal.baseline = value;
+    goal.current = value;
+  } else {
+    goal.current = value;
+  }
+  issue.measurement = { value, unit: entry.unit, source: entry.source, at: entry.at };
+  issue.updatedAt = nowIso();
+  recomputeGoal(goal);
+  return entry;
+}
+
 /** Refresh derived counters after any mutation. */
 export function recomputeCompany(company) {
   for (const agent of company.agents) {
@@ -272,12 +400,14 @@ export function recomputeCompany(company) {
     const linked = company.issues.filter((issue) => issue.goalId === goal.id);
     const accepted = linked.filter((issue) => issue.status === "done").length;
     goal.progress = {
+      ...(goal.progress ?? {}),
       accepted,
       total: linked.length,
       pct: linked.length ? Math.round((accepted / linked.length) * 100) : 0,
     };
     const countGoal = !goal.unit || goal.unit === "issues" || /deliverable/i.test(goal.metric ?? "");
     if (countGoal && goal.baseline !== null) goal.current = accepted;
+    recomputeGoal(goal);
   }
   company.stats = {
     agents: company.agents.length,

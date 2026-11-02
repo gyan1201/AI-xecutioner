@@ -40,7 +40,11 @@ export async function render(root, ctx) {
                     <span class="tag">${goal.baseline === null || goal.baseline === undefined ? "baseline not measured yet" : `baseline ${num(goal.baseline)}`}</span>
                     <span class="tag">${goalDirection(goal)}</span>
                     <span class="tag">${goal.progress?.accepted ?? goal.done} of ${goal.progress?.total ?? goal.issues} accepted</span>
+                    ${goal.progress?.metricPct !== null && goal.progress?.metricPct !== undefined ? `<span class="tag">${goal.progress.metricPct}% of the way</span>` : ""}
                   </div>
+                  ${(goal.measurements ?? []).length
+                    ? `<div class="hint">Last measured <b>${esc(num(goal.measurements[0].value))}${goal.unit ? ` ${esc(goal.unit)}` : ""}</b> · ${esc(goal.measurements[0].source)} · ${new Date(goal.measurements[0].at).toLocaleString()}</div>`
+                    : `<div class="hint">No measurement recorded yet — run the baseline issue to set one.</div>`}
                   <div class="hint">Owner ${esc(goal.owner ?? "unassigned")}${goal.dueAt ? ` · due ${new Date(goal.dueAt).toLocaleDateString()}` : ""}</div>
                 </div>`;
               })
@@ -69,8 +73,8 @@ function goalModal(ctx, goal) {
         <div class="field"><label>Unit</label><input class="input" name="unit" value="${esc(goal?.unit ?? "")}" placeholder="USD" /></div>
       </div>
       <div class="grid" style="grid-template-columns:1fr 1fr 1fr">
-        <div class="field"><label>Baseline</label><input class="input" type="number" step="any" name="baseline" value="${goal?.baseline ?? 0}" /></div>
-        <div class="field"><label>Current</label><input class="input" type="number" step="any" name="current" value="${goal?.current ?? 0}" /></div>
+        <div class="field"><label>Baseline</label><input class="input" type="number" step="any" name="baseline" value="${goal?.baseline ?? ""}" placeholder="not measured" /></div>
+        <div class="field"><label>Current</label><input class="input" type="number" step="any" name="current" value="${goal?.current ?? ""}" placeholder="not measured" /></div>
         <div class="field"><label>Target</label><input class="input" type="number" step="any" name="target" value="${goal?.target ?? 100}" /></div>
       </div>
       <div class="field"><label>Owner</label><select class="select" name="ownerId">

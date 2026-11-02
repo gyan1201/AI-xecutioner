@@ -25,6 +25,7 @@ import {
   findIssue,
   pushActivity,
   recomputeCompany,
+  recordGoalMeasurement,
   recordLedger,
 } from "./model.mjs";
 import { renderContext, searchKnowledge } from "./retrieval.mjs";
@@ -82,6 +83,23 @@ export function createEngine({ store, nim, bus }) {
     return others[0] ?? company.agents.find((agent) => agent.id !== excludeAgentId) ?? null;
   }
 
+  /** The goal this issue is accountable to: its own goal first, then the active one. */
+  function goalForIssue(company, issue) {
+    return company.goals.find((goal) => goal.id === issue.goalId)
+      ?? company.goals.find((goal) => goal.status === "active")
+      ?? company.goals[0]
+      ?? null;
+  }
+
+  /** The goal contract an agent or reviewer needs to see, in one block. */
+  function goalBrief(goal) {
+    if (!goal) return "";
+    const unit = goal.unit ? ` ${goal.unit}` : "";
+    const baseline = goal.baseline === null || goal.baseline === undefined ? "not measured yet" : `${goal.baseline}${unit}`;
+    const current = goal.current === null || goal.current === undefined ? "" : ` · current ${goal.current}${unit}`;
+    return `Goal: ${goal.title}\nMetric: ${goal.metric || "the goal metric"} · target ${goal.target}${unit} · baseline ${baseline}${current}`;
+  }
+
   function budgetFor(company, agent) {
     const spend = agentSpendStatus(company, agent);
     const companyCapCents = company.settings.monthlyBudgetCents ?? 0;
@@ -112,9 +130,10 @@ ${(agent.monthlyBudgetCents ?? 0) > 0 ? `- Stay inside your monthly budget of $$
 ${(agent.memory ?? []).length ? `\nWhat you learned from work you already shipped:\n${agent.memory.slice(0, 5).map((entry) => `- ${entry.issueKey ?? "work"}: ${entry.lesson}`).join("\n")}\n` : ""}${agent.instructions ? `\nRole instructions:\n${agent.instructions}` : ""}${skillPrompt(agent.skills)}
 `;
     if (mode === "review") {
+      const goal = goalForIssue(company, issue);
       return `Task type: review\n\n${base}\nYou are reviewing another agent's deliverable against the issue's acceptance criteria. Reply with JSON only:
 {"verdict":"accepted"|"changes_requested","score":0-100,"summary":"...","findings":[{"severity":"blocker"|"major"|"minor"|"nit","finding":"...","fix":"..."}],"follow_ups":["..."]}
-Be hard to impress; do not accept work that lacks evidence.`;
+Be hard to impress; do not accept work that lacks evidence.${goal ? `\n\n${goalBrief(goal)}\nIf the deliverable reports a measured value for this metric, return it as "measurement": {"value": <number>, "unit": "${goal.unit ?? ""}", "source": "<where the number came from>"}. If it does not report one, return null. Do not estimate a number the deliverable does not contain.` : ""}`;
     }
     return `Task type: deliverable\n\n${base}\nDeliverable format (markdown, no code fence around the whole answer):
 ## <title>
@@ -130,6 +149,10 @@ Be hard to impress; do not accept work that lacks evidence.`;
     const acceptance = (issue.acceptance ?? []).length
       ? issue.acceptance.map((item) => `- [ ] ${item}`).join("\n")
       : "- [ ] The deliverable is reviewable and linked";
+    const goal = goalForIssue(company, issue);
+    const measureLine = goal
+      ? `\n\n${goalBrief(goal)}\nIf this issue measures the metric, put the measured value in the Numbers section as "Measured ${goal.metric || "metric"}: <value> ${goal.unit ?? ""} (source: <where it came from>)".`
+      : "";
     return `Issue: ${issue.key} — ${issue.title}
 Company: ${company.name}
 Agent: ${agent.name}
@@ -139,7 +162,7 @@ ${issue.blockedReason ? `Blocked reason: ${issue.blockedReason}\n` : ""}Descript
 ${issue.description || "(no description)"}
 
 Definition of done:
-${acceptance}
+${acceptance}${measureLine}
 
 ${renderContext(context)}
 
@@ -411,6 +434,8 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
             // 6 — review gate
             const critic = criticFor(company, agent.id);
             let verdict = null;
+            let measurement = null;
+            let measuredGoal = null;
             if (critic && company.settings.approvalPolicy !== "off") {
               issue.status = "in_review";
               issue.updatedAt = nowIso();
@@ -421,7 +446,7 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
                 },
                 {
                   role: "user",
-                  content: `Issue: ${issue.key} — ${issue.title}\nReview attempt: ${(issue.reviewCount ?? 0) + 1}\nDefinition of done:\n${(issue.acceptance ?? []).map((item) => `- [ ] ${item}`).join("\n") || "- [ ] Reviewable deliverable"}\n\nDeliverable by ${agent.name}:\n${clampText(deliverable, 6000)}`,
+                  content: `Issue: ${issue.key} — ${issue.title}\nReview attempt: ${(issue.reviewCount ?? 0) + 1}\n${goalBrief(goalForIssue(company, issue)) ? `${goalBrief(goalForIssue(company, issue))}\n` : ""}Definition of done:\n${(issue.acceptance ?? []).map((item) => `- [ ] ${item}`).join("\n") || "- [ ] Reviewable deliverable"}\n\nDeliverable by ${agent.name}:\n${clampText(deliverable, 6000)}`,
                 },
               ];
               const review = await nim.chat({
@@ -450,6 +475,19 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
                 issue.status = "todo";
               }
               issue.updatedAt = nowIso();
+              // Evidence only counts once the work is accepted. The reviewer
+              // returns the number; the engine decides whether it belongs to
+              // the goal (and whether it is the baseline or a new current).
+              if (accepted) {
+                measuredGoal = goalForIssue(company, issue);
+                measurement = recordGoalMeasurement(company, measuredGoal, issue, verdict.measurement, run, agent);
+                if (measurement) {
+                  step("Goal measured", `${measuredGoal.metric}: ${measurement.value}${measurement.unit ? ` ${measurement.unit}` : ""} · ${measurement.source}`, 0);
+                }
+              }
+              const measurementLine = measurement
+                ? `\n\n**Measured ${measuredGoal.metric}:** ${measurement.value}${measurement.unit ? ` ${measurement.unit}` : ""} — ${measurement.source}`
+                : "";
               const reviewComment = createComment({
                 issueId: issue.id,
                 authorType: "agent",
@@ -459,12 +497,20 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
                   (verdict.findings ?? [])
                     .map((finding) => `- **${finding.severity ?? "note"}** — ${finding.finding}${finding.fix ? `\n  _Fix:_ ${finding.fix}` : ""}`)
                     .join("\n") || "- No findings."
-                }${(verdict.follow_ups ?? []).length ? `\n\n**Follow-ups**\n${verdict.follow_ups.map((item) => `- ${item}`).join("\n")}` : ""}`,
-                meta: { runId: run.id, model: critic.model, verdict: verdict.verdict, score: verdict.score },
+                }${(verdict.follow_ups ?? []).length ? `\n\n**Follow-ups**\n${verdict.follow_ups.map((item) => `- ${item}`).join("\n")}` : ""}${measurementLine}`,
+                meta: { runId: run.id, model: critic.model, verdict: verdict.verdict, score: verdict.score, measurement },
               });
               company.comments.unshift(reviewComment);
               notify(company, { type: "comment.created", payload: { comment: reviewComment, issueId: issue.id } });
-              run.review = { verdict: verdict.verdict, score: verdict.score, reviewerId: critic.id, summary: verdict.summary };
+              run.review = {
+                verdict: verdict.verdict,
+                score: verdict.score,
+                reviewerId: critic.id,
+                summary: verdict.summary,
+                measurement: measurement
+                  ? { value: measurement.value, unit: measurement.unit, source: measurement.source, kind: measurement.kind }
+                  : null,
+              };
               step(
                 "Quality gate",
                 `${verdict.verdict} · score ${verdict.score ?? "—"} by ${critic.name} · attempt ${(issue.reviewCount ?? 0) + 1}`,
@@ -479,6 +525,17 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
             run.status = "succeeded";
             run.agentName = agent.name;
             if (issue.status === "done") remember(company, { agent, issue, verdict: run.review, deliverable });
+            if (measurement && measuredGoal) {
+              pushActivity(company, {
+                kind: "goal.measured",
+                actorId: agent.id,
+                subject: `${measuredGoal.metric} measured`,
+                detail: `${measurement.value}${measurement.unit ? ` ${measurement.unit}` : ""} · ${measurement.source}`,
+                issueId: issue.id,
+                meta: { goalId: measuredGoal.id, value: measurement.value, unit: measurement.unit, kind: measurement.kind },
+              });
+              notify(company, { type: "goal.measured", payload: { goalId: measuredGoal.id, measurement } });
+            }
             notify(company, {
               type: "run.succeeded",
               payload: { runId: run.id, issueId: issue.id, agentId: agent.id, verdict: run.review?.verdict ?? null, costCents: run.costCents },

@@ -61,6 +61,7 @@ A launch is only the first second of a company, so the loop that follows is wher
 
 * **The goal is the user's sentence.** *"Cut support response time to under five minutes"* becomes metric `support response time`, unit `min`, target `5`, direction `decrease`. Mixed units are converted (`from 6 weeks to 5 days` → baseline 42 days), `instead of` sentences are read backwards, and a percentage reduction beats an unrelated target later in the same sentence. When no baseline is stated, the baseline stays **unmeasured** rather than being invented as zero, and the first issue is the one that goes and measures it.
 * **Progress is computed, never asserted.** A goal's percentage is the share of its linked work that a reviewer accepted. There is no field an agent can write to claim the metric moved; the issue has to ship and be accepted first.
+* **The metric is measured, not asserted.** When an accepted issue measures the goal's metric, the reviewer returns the number with its source and the engine records it: the first measurement of an unmeasured goal becomes its **baseline**, later ones move **current**, and the goal keeps a measurement history. A `12 → 4 minutes` goal then shows `4 min` and 80% of the way, instead of a permanent `0%`; an issue that only quotes an older number does not move it.
 * **The standup is a heartbeat.** Routines are dispatched at the start of every cycle *and* on the autonomous tick, cadence follows the company's cycle length, and the first run is due at launch — `nextRunAt` on its own used to mean nothing ever fired.
 * **Work is scheduled fairly.** The next cycle takes the issues with the fewest runs (then the ones untouched longest) before it considers priority, so a `low` review gate can no longer starve behind two `high` items forever.
 * **The board refills.** When everything has shipped, the next cycle opens grounded follow-up work — measure the metric now that something ships, close the next step the last review named — capped so the company keeps a rhythm instead of a template chasing its own tail.
@@ -96,7 +97,7 @@ NVIDIA_API_KEY=nvapi-... npm start
 …or paste the key — or a whole snippet — into **Settings → Quick Setup via Code Snippet**. It is verified against `GET /v1/models` when the host can reach it, stored in `data/keys.json` with mode `0600`, and never sent back to the browser.
 
 ```bash
-npm test             # 62 tests: catalog, engine, providers, HTTP surface, shell invariants
+npm test             # 79 tests: catalog, engine, providers, HTTP surface, shell invariants
 npm run sync:skills  # re-snapshot github.com/NVIDIA/skills (optional)
 ```
 

@@ -98,7 +98,7 @@ A run executes seven steps and appends `run.steps[]`. `verdict` is `{ verdict: "
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| GET/POST | `/api/companies/:id/goals` | `{ title, metric?, unit?, baseline?, current?, target?, ownerId? }` |
+| GET/POST | `/api/companies/:id/goals` | `{ title, metric?, unit?, baseline?, current?, target?, ownerId? }` — a goal also carries `measurements[]` (`{ value, unit, source, at, issueId, issueKey, kind: "baseline"\|"current" }`) and `progress.metricPct`, written only by an accepted run |
 | PATCH | `/api/companies/:id/goals/:goalId` | |
 | GET/POST | `/api/companies/:id/projects` | `{ name, description?, color? }` |
 | PATCH | `/api/companies/:id/projects/:projectId` | |

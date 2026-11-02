@@ -19,6 +19,7 @@ delete process.env.NIM_API_KEY;
 
 const { createRuntime } = await import("../server/runtime.mjs");
 const { deriveGoal, planForGoal, matchBlueprint, goalTitle } = await import("../server/domain/launch.mjs");
+const { createGoal, createIssue, recordGoalMeasurement } = await import("../server/domain/model.mjs");
 const { goalPill, goalProgress, goalTarget } = await import("../web/views/shared.js");
 
 const runtime = createRuntime({ logger: { log() {}, warn() {}, error() {} } });
@@ -55,6 +56,14 @@ test("a goal sentence yields a metric with a unit, a target and a direction", ()
   assert.match(percent.metric, /cloud spend/);
 
   assert.equal(deriveGoal("Make the best analytics product in the world"), null);
+
+  // A stated baseline is the starting point, not zero: 12 → 4 is 0% moved on
+  // day one, not 100%.
+  const stated = createGoal({ title: "Clinical", metric: "documentation time", unit: "min", baseline: 12, target: 4, direction: "decrease" });
+  assert.equal(stated.current, 12, "a stated baseline is the current value until it is measured");
+  assert.equal(goalProgress(stated), 0);
+  const unmeasured = createGoal({ title: "Support", metric: "response time", unit: "min", target: 5, baseline: null });
+  assert.equal(unmeasured.current, null, "an unmeasured goal has no current value");
 });
 
 test("the launched goal keeps the user's number, not the blueprint's placeholder", () => {
@@ -147,7 +156,91 @@ test("goal progress is written from accepted work, never asserted", async () => 
   const activeGoal = company.goals[0];
   assert.equal(activeGoal.progress.total, company.issues.filter((issue) => issue.goalId === activeGoal.id).length);
   assert.equal(activeGoal.progress.accepted, company.issues.filter((issue) => issue.goalId === activeGoal.id && issue.status === "done").length);
-  assert.equal(activeGoal.current, null, "a minutes goal has no placeholder count as its current value");
+  // A metric goal's current value is never a placeholder count: it is either
+  // unmeasured (null) or backed by a measurement an accepted run recorded.
+  if (activeGoal.current === null) {
+    assert.equal(activeGoal.progress.metricPct, null, "no measurement means no metric percentage");
+  } else {
+    assert.ok(activeGoal.measurements.length > 0, "a current value must come from a measurement");
+    assert.ok(
+      activeGoal.measurements.some((entry) => company.issues.find((issue) => issue.id === entry.issueId)?.status === "done"),
+      "the measurement must come from accepted work",
+    );
+    assert.ok(activeGoal.progress.metricPct >= 0 && activeGoal.progress.metricPct <= 100);
+  }
+});
+
+test("an accepted baseline issue measures the goal, and later work moves the metric", async () => {
+  const goal = "Cut support response time to under five minutes";
+  const plan = planForGoal({ name: "Measure Co", goal });
+  const launched = await service.launchCompany({ name: "Measure Co", mission: goal, plan, runCycle: false });
+  const companyId = launched.company.id;
+  let company = runtime.store.getCompany(companyId);
+  const baselineIssue = company.issues.find((issue) => /baseline/i.test(issue.title));
+  assert.ok(baselineIssue, "the launch backlog includes the issue that measures the baseline");
+
+  const baselineRun = await engine.runIssue({ companyId, issueId: baselineIssue.id, actorId: "test" });
+  assert.equal(baselineRun.verdict?.verdict, "accepted", "the simulated reviewer accepts the baseline issue");
+  company = runtime.store.getCompany(companyId);
+  const goalAfterBaseline = company.goals[0];
+  assert.notEqual(goalAfterBaseline.baseline, null, "the measured baseline is recorded on the goal");
+  assert.equal(goalAfterBaseline.current, goalAfterBaseline.baseline);
+  assert.ok(goalAfterBaseline.measurements.length >= 1);
+  assert.equal(goalAfterBaseline.measurements[0].kind, "baseline");
+  assert.equal(company.issues.find((issue) => issue.id === baselineIssue.id).measurement.value, goalAfterBaseline.baseline);
+
+  // A follow-up measurement moves current toward the target, without ever
+  // claiming a number the reviewer did not see.
+  const followUp = {
+    title: "Measure support response time after the baseline",
+    description: "Run the support response time check on the new triage path and record the measured value with its source.",
+    acceptance: ["A measured support response time value with its source", "Compared to the target, with the gap named"],
+    status: "todo",
+    priority: "high",
+    assigneeId: company.agents.find((agent) => agent.role === "operator")?.id ?? company.agents[0].id,
+    goalId: goalAfterBaseline.id,
+    labels: ["follow-up"],
+    createdBy: "test",
+  };
+  const created = await service.createIssue(companyId, followUp);
+  const followUpRun = await engine.runIssue({ companyId, issueId: created.issue.id, actorId: "test" });
+  assert.equal(followUpRun.verdict?.verdict, "accepted", "the follow-up measurement is accepted");
+  company = runtime.store.getCompany(companyId);
+  const goalAfterFollowUp = company.goals[0];
+  assert.notEqual(goalAfterFollowUp.current, goalAfterBaseline.baseline, "the metric moved");
+  assert.ok(goalAfterFollowUp.measurements.length >= 2);
+  assert.equal(goalAfterFollowUp.measurements[0].kind, "current");
+  const span = Math.abs(goalAfterBaseline.target - goalAfterBaseline.baseline);
+  const moved = Math.abs(goalAfterFollowUp.current - goalAfterBaseline.baseline);
+  assert.ok(moved > 0 && moved <= span, "the measurement moves toward the target without overshooting it");
+  assert.ok(goalAfterFollowUp.progress.metricPct > 0 && goalAfterFollowUp.progress.metricPct <= 100);
+});
+
+test("a measurement is evidence: invalid values and mismatched units are ignored", () => {
+  const company = { nextIssueNumber: 100, issuePrefix: "T" };
+  const goal = createGoal({ title: "Cut latency", metric: "latency", unit: "min", target: 5, baseline: null });
+  const baselineIssue = createIssue(company, { title: "Lock the baseline for latency", goalId: goal.id });
+  assert.equal(recordGoalMeasurement(company, goal, baselineIssue, { value: "nope" }, null, null), null);
+  assert.equal(recordGoalMeasurement(company, goal, baselineIssue, { value: 8, unit: "kg" }, null, null), null);
+  const baseline = recordGoalMeasurement(company, goal, baselineIssue, { value: 8, unit: "minutes" }, null, null);
+  assert.ok(baseline, "a valid measurement with an equivalent unit is recorded");
+  assert.equal(baseline.kind, "baseline");
+  assert.equal(goal.baseline, 8);
+  assert.equal(goal.current, 8);
+  assert.equal(baselineIssue.measurement.value, 8);
+
+  const currentIssue = createIssue(company, { title: "Measure latency again", goalId: goal.id });
+  const current = recordGoalMeasurement(company, goal, currentIssue, { value: 6, unit: "min", source: "run trace" }, null, null);
+  assert.ok(current);
+  assert.equal(current.kind, "current");
+  assert.equal(goal.current, 6);
+  assert.equal(goal.progress.metricPct, 67, "6 is two thirds of the way from 8 to 5");
+
+  // Without a baseline, only the issue that measures the starting point counts.
+  const unmeasured = createGoal({ title: "Cut latency", metric: "latency", unit: "min", target: 5, baseline: null });
+  const otherIssue = createIssue(company, { title: "Build the pipeline", goalId: unmeasured.id });
+  assert.equal(recordGoalMeasurement(company, unmeasured, otherIssue, { value: 6, unit: "min" }, null, null), null);
+  assert.equal(unmeasured.current, null);
 });
 
 test("an empty board with shipped work opens the next measurement", async () => {

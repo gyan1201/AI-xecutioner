@@ -1,21 +1,22 @@
-launched Signal Desk (co_signal_desk_rtm) in 63 ms
+launched Signal Desk (co_signal_desk_0wf) in 73 ms
 blueprint: Customer Service Voice Agent (Agentic AI)
-goal: support response time unmeasured → 5 min (decrease)
+goal: support response time 7 → 5 min (decrease)
   - Noah Bergström · Solution Architect · nvidia/nemotron-3-ultra-550b-a55b · rag-blueprint, nemotron-voice-agent-builder
   - Idris Bello · Implementation Engineer · nvidia/nemotron-3-super-120b-a12b · nemotron-asr-finetune, cdf-curation-and-retrieval
   - Aisha Rahman · Quality Lead · nvidia/nemotron-3-super-120b-a12b · rag-eval, rag-perf
-cycle 1: 2 ran · 2 accepted · $0.01 · 0s · Measure "Customer Service Voice Agent: runbook and handover" first: the baseline has to ex
-cycle 2: 2 ran · 2 accepted · $0.01 · 0s · Ship "Ship the first end-to-end slice and review it" and prove it against its acceptance c
-cycle 3: 2 ran · 2 accepted · $0.01 · 0s · Ship "Ship the follow-up SD-107 asked for" and prove it against its acceptance criteria.
-cycle 4: 1 ran · 1 accepted · $0.01 · 0s · Take "Ship the follow-up SD-109 asked for" end to end this cycle, with the next item queue
+cycle 1: 2 ran · 2 accepted · $0.01 · 0s · Ship "Customer Service Voice Agent: runbook and handover" and prove it against its accepta
+cycle 2: 2 ran · 2 accepted · $0.02 · 0s · Ship "Ship the first end-to-end slice and review it" and prove it against its acceptance c
+cycle 3: 2 ran · 2 accepted · $0.02 · 0s · Ship "Ship the follow-up SD-107 asked for" and prove it against its acceptance criteria.
+cycle 4: 1 ran · 1 accepted · $0.01 · 0s · Measure "Ship the follow-up SD-109 asked for" first: the baseline has to exist before more
 cycle 5 (routine check): 0 ran
 
 == company ==
 cycles: 6
 work runs: 10 · accepted 10 · rework 0 · accept rate 100%
-shipped: 10/10 · artifacts 10 · spend $0.08 · $0.01 per shipped issue
+shipped: 10/10 · artifacts 10 · spend $0.09 · $0.01 per shipped issue
 routines: Cycle standup: 2 runs (every 5m)
-goal: support response time · baseline unmeasured → 5 min · progress {"accepted":10,"total":10,"pct":100}
+goal: support response time · baseline 7 → 5.4 → 5 min · progress {"accepted":10,"total":10,"pct":100,"metricPct":80,"measuredAt":"2026-11-02T14:15:51.775Z"}
+measurements: 2 · latest 5.4 min (current) from SD-107
 knowledge docs: 11 · agent memory: 2/3
 ledger rows: 110 · simulated only: true
 
@@ -33,20 +34,22 @@ ledger rows: 110 · simulated only: true
 
 == per agent ==
   Noah Bergström     Solution Architect       0 work · 8 plan/standup · 0 accept · $0.02 · 0%
-  Idris Bello        Implementation Engineer  6 work · 6 plan/standup · 6 accept · $0.03 · 100%
+  Idris Bello        Implementation Engineer  6 work · 6 plan/standup · 6 accept · $0.04 · 100%
   Aisha Rahman       Quality Lead             4 work · 0 plan/standup · 4 accept · $0.03 · 100%
 
 == focus per cycle ==
-  1: Measure "Customer Service Voice Agent: runbook and handover" first: the baseline has to exist before more work lands on the board.
+  1: Ship "Customer Service Voice Agent: runbook and handover" and prove it against its acceptance criteria.
   2: Ship "Ship the first end-to-end slice and review it" and prove it against its acceptance criteria.
   3: Ship "Ship the follow-up SD-107 asked for" and prove it against its acceptance criteria.
-  4: Take "Ship the follow-up SD-109 asked for" end to end this cycle, with the next item queued behind it.
+  4: Measure "Ship the follow-up SD-109 asked for" first: the baseline has to exist before more work lands on the board.
 
 == verdicts ==
   PASS  launch produces a real roster
   PASS  skills are distinct per agent
   PASS  goal metric read from the sentence
   PASS  goal has moved
+  PASS  goal metric was measured
+  PASS  measurement came from accepted work
   PASS  a routine fired
   PASS  every issue got at least one run
   PASS  all issues shipped
@@ -55,4 +58,4 @@ ledger rows: 110 · simulated only: true
   PASS  every accepted issue left a knowledge doc
   PASS  accepted work wrote agent memory
   PASS  ledger is honest
-  12/12 checks
+  14/14 checks

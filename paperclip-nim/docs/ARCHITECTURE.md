@@ -37,13 +37,14 @@ Progress is emitted as SSE `step` / `progress` frames with stable ids (`brief`, 
 4. **Tools** — the agent may call `knowledge_search`, `calculator`, `create_artifact`, `generate_image`, `check_safety`, `escalate` or `update_issue`, bounded by `MAX_TOOL_HOPS` (3).
 5. **Deliverable** — streamed completion, saved as a run output and an artifact.
 6. **Guardrail (output)** — a failing output stops the run before review.
-7. **Quality review** — a critic agent returns JSON `{verdict, score, findings[]}`; a rejection returns the issue to `todo`, records the attempt, and the next run is labelled `Review attempt: N`.
+7. **Quality review** — a critic agent returns JSON `{verdict, score, findings[], measurement}`; a rejection returns the issue to `todo`, records the attempt, and the next run is labelled `Review attempt: N`. An accepted measurement is written to the goal: the first one sets the baseline, later ones move `current`, and the goal keeps the history with its source.
 
 Every model call is wrapped in `withUsageContext({ companyId, runId, agentId, sink })`. The sink writes a ledger row from the NIM usage event, so **the ledger is derived from real usage, not estimated after the fact** — including simulated usage, which keeps the spend screens honest in demo mode.
 
 Invariants worth keeping:
 
 * Money is stored in cents with two decimals (`0.52`, not `1`); never round to whole cents or simulated spend disappears.
+* A measurement is evidence, not a claim: only an accepted issue records one, the first sets the baseline, later ones move `current`, and a unit that does not match the goal is ignored. A run that only quotes an older number does not move the metric.
 * A blocked run is still a run with a trace, but it never appends a ledger row.
 * `run.steps[]` is the audit trail. If a step is not in `steps`, it did not happen.
 * Events are published after state is saved, so a subscriber that refetches sees the new state.
@@ -75,11 +76,11 @@ The UI surfaces the flag (`simulated` pill in Studio, "simulated" in run metadat
 ## Testing
 
 ```bash
-npm test                       # 62 tests
+npm test                       # 79 tests
 node --test test/engine.test.mjs
 ```
 
-* `test/company.test.mjs` — goal-sentence metrics, distinct skills per hire, blueprint routing for physical AI, routine dispatch, fair scheduling, computed goal progress, board replenishment.
+* `test/company.test.mjs` — goal-sentence metrics, distinct skills per hire, blueprint routing for physical AI, routine dispatch, fair scheduling, computed goal progress, measured baselines/current values, board replenishment.
 * `test/catalog.test.mjs` — 97 models / 430 skills / 37 blueprints, capability coverage, defaults resolve, live merge, blueprint model references.
 * `test/engine.test.mjs` — seed, full run, review attempt, unlimited spend + budget gate, plan, cycle + standup, approvals, knowledge search, agent CRUD, embedding geometry.
 * `test/api.test.mjs` — every route group over HTTP, including full auto: blueprint match, staffed launch, SSE step stream, key configuration without echo, and a first cycle.
