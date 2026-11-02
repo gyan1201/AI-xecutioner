@@ -705,6 +705,7 @@ export function createApp(runtime) {
         owner: doc.agents.find((agent) => agent.id === goal.ownerId)?.name ?? null,
         issues: doc.issues.filter((issue) => issue.goalId === goal.id).length,
         done: doc.issues.filter((issue) => issue.goalId === goal.id && issue.status === "done").length,
+        progress: goal.progress ?? { accepted: 0, total: 0, pct: 0 },
       })),
     };
   });

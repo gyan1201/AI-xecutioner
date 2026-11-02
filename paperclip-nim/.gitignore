@@ -6,3 +6,6 @@ data/providers.json
 data/settings.json
 *.log
 .DS_Store
+
+# example-company benchmark scratch dir
+.bench-data/

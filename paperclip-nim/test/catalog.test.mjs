@@ -100,10 +100,13 @@ test("skill search matches title, description and tags", () => {
   assert.ok(suggestions.length <= 5);
 });
 
-test("blueprints are the 36 build.nvidia.com reference architectures", () => {
+test("blueprints are the 36 reference architectures plus the Physical AI cell", () => {
   const stats = blueprintStats();
-  assert.equal(stats.count, 36);
-  assert.equal(BLUEPRINTS.length, 36);
+  // 36 come from build.nvidia.com; physical-ai-robotics is ours, because the
+  // reference set has no teleoperation → policy → sim-to-real pipeline.
+  assert.equal(stats.count, 37);
+  assert.equal(BLUEPRINTS.length, 37);
+  assert.ok(BLUEPRINTS.some((blueprint) => blueprint.id === "physical-ai-robotics"));
   assert.ok(stats.categories.length >= 5);
   for (const blueprint of BLUEPRINTS) {
     assert.ok(blueprint.id && blueprint.name, `${blueprint.id} needs an id and a name`);
@@ -117,7 +120,7 @@ test("blueprints are the 36 build.nvidia.com reference architectures", () => {
 
 test("blueprint search filters by category and query", () => {
   const all = listBlueprints({});
-  assert.equal(all.length, 36);
+  assert.equal(all.length, 37);
   const category = BLUEPRINTS[0].category;
   const filtered = listBlueprints({ category });
   assert.ok(filtered.length > 0);

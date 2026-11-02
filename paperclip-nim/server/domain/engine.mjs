@@ -19,6 +19,8 @@ import {
   agentSpendStatus,
   createApproval,
   createComment,
+  createIssue,
+  createKnowledge,
   findAgent,
   findIssue,
   pushActivity,
@@ -107,7 +109,7 @@ Working agreements:
 - Cite company knowledge as [1], [2] when you use it. Never invent a metric, customer quote or dashboard.
 - If the evidence is missing, say what would settle it and how much it would cost.
 ${(agent.monthlyBudgetCents ?? 0) > 0 ? `- Stay inside your monthly budget of $${(agent.monthlyBudgetCents / 100).toFixed(2)}.` : "- No spend limit is set; keep each run focused anyway."}
-${agent.instructions ? `\nRole instructions:\n${agent.instructions}` : ""}${skillPrompt(agent.skills)}
+${(agent.memory ?? []).length ? `\nWhat you learned from work you already shipped:\n${agent.memory.slice(0, 5).map((entry) => `- ${entry.issueKey ?? "work"}: ${entry.lesson}`).join("\n")}\n` : ""}${agent.instructions ? `\nRole instructions:\n${agent.instructions}` : ""}${skillPrompt(agent.skills)}
 `;
     if (mode === "review") {
       return `Task type: review\n\n${base}\nYou are reviewing another agent's deliverable against the issue's acceptance criteria. Reply with JSON only:
@@ -476,6 +478,7 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
             run.output = deliverable.slice(0, 2000);
             run.status = "succeeded";
             run.agentName = agent.name;
+            if (issue.status === "done") remember(company, { agent, issue, verdict: run.review, deliverable });
             notify(company, {
               type: "run.succeeded",
               payload: { runId: run.id, issueId: issue.id, agentId: agent.id, verdict: run.review?.verdict ?? null, costCents: run.costCents },
@@ -544,13 +547,17 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
         throw error;
       }
       const open = company.issues.filter((issue) => OPEN_STATUSES.includes(issue.status));
+      const attempts = attemptCounts(company);
       const board = open
         .slice(0, 24)
         .map((issue, index) => {
           const owner = findAgent(company, issue.assigneeId);
-          return `${index + 1}. [${issue.status}/${issue.priority}] ${issue.title} — ${owner?.name ?? "unassigned"}`;
+          const tries = attempts.get(issue.id) ?? 0;
+          return `${index + 1}. [${issue.status}/${issue.priority}] ${issue.title} — ${owner?.name ?? "unassigned"} (${tries} run${tries === 1 ? "" : "s"})`;
         })
         .join("\n");
+      const cycleNumber = company.cycleHistory?.length ?? 0;
+      const lastFocus = [...(company.cycleHistory ?? [])].reverse().find((entry) => entry?.focus)?.focus ?? "";
       const goals = company.goals.map((goal) => `- ${goal.title}: ${goal.current}/${goal.target} ${goal.unit}`).join("\n");
       const run = {
         id: newId("run"),
@@ -601,7 +608,7 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
               },
               {
                 role: "user",
-                content: `Goal:\n${goals || "- no goals defined"}\n\nOpen board (${open.length} issues):\n${board || "(empty)"}\n\nSpend so far: $${(budget.companySpentCents / 100).toFixed(2)} of $${(budget.companyCapCents / 100).toFixed(2)}.\n\nReturn JSON only:\n{"focus":"one sentence","rationale":"two sentences","assignments":[{"title":"must match a board title","owner":"role name","why":"one sentence","priority":"urgent|high|medium|low"}],"risks":["..."],"citations":["..."]}`,
+                content: `Cycle #${cycleNumber + 1}.${lastFocus ? ` Last cycle's focus was: ${lastFocus}` : ""}\nGoal:\n${goals || "- no goals defined"}\n\nOpen board (${open.length} issues, with how many times each has run):\n${board || "(empty)"}\n\nSpend so far: $${(budget.companySpentCents / 100).toFixed(2)} of $${(budget.companyCapCents / 100).toFixed(2)}.\nPick a focus this cycle that is different from last cycle's, and put work that has never run at the top of the assignments.\n\nReturn JSON only:\n{"focus":"one sentence","rationale":"two sentences","assignments":[{"title":"must match a board title","owner":"role name","why":"one sentence","priority":"urgent|high|medium|low"}],"risks":["..."],"citations":["..."]}`,
               },
             ],
             temperature: 0.3,
@@ -652,21 +659,53 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
     });
   }
 
-  /** Full cycle: plan, then run the highest-value issues inside budget. */
+  /** Full cycle: due routines, plan, then run the highest-value issues inside budget. */
   async function planCycle({ companyId, maxIssues = 3, onDelta, signal, auto = false }) {
+    // Whatever came due runs first — a routine that is never dispatched is a
+    // decoration with a nextRunAt field.
+    const dueCompany = store.getCompany(companyId);
+    const due = (dueCompany?.routines ?? [])
+      .filter((routine) => routine.enabled !== false)
+      .filter((routine) => !routine.nextRunAt || new Date(routine.nextRunAt).getTime() <= Date.now())
+      .slice(0, 2);
+    for (const routine of due) {
+      try {
+        await runRoutine({ companyId, routineId: routine.id });
+      } catch (error) {
+        emit(companyId, { type: "auto.error", payload: { error: error.message, phase: "routine" } });
+      }
+    }
+
+    const beforePlan = store.getCompany(companyId);
+    if (beforePlan) replenishBoard(beforePlan, { max: 2 });
+
     const planned = await planOnly({ companyId, signal });
     const { plan } = planned;
     const company = store.getCompany(companyId);
     const focusTitles = new Set((plan.assignments ?? []).map((assignment) => String(assignment.title ?? "").toLowerCase()));
+    // Fairness first: a board that always serves the same two issues starves the
+    // rest forever (SD-106 never ran once). Fewest runs wins, then whoever has
+    // been untouched longest, then priority and the CEO's focus.
+    const attempts = attemptCounts(company);
+    const lastTouch = new Map();
+    for (const run of company.runs) {
+      if (!run.issueId) continue;
+      const started = new Date(run.startedAt ?? 0).getTime();
+      lastTouch.set(run.issueId, Math.max(lastTouch.get(run.issueId) ?? 0, Number.isFinite(started) ? started : 0));
+    }
     const candidates = company.issues
       .filter((issue) => OPEN_STATUSES.includes(issue.status) && issue.status !== "blocked")
       .filter((issue) => !company.approvals.some((approval) => approval.issueId === issue.id && approval.status === "pending"))
       .sort((a, b) => {
+        const triesA = attempts.get(a.id) ?? 0;
+        const triesB = attempts.get(b.id) ?? 0;
+        if (triesA !== triesB) return triesA - triesB;
+        const touchA = lastTouch.get(a.id) ?? 0;
+        const touchB = lastTouch.get(b.id) ?? 0;
+        if (touchA !== touchB) return touchA - touchB;
         const focusA = [...focusTitles].some((title) => title && a.title.toLowerCase().includes(title.slice(0, 20))) ? 0 : 1;
         const focusB = [...focusTitles].some((title) => title && b.title.toLowerCase().includes(title.slice(0, 20))) ? 0 : 1;
         if (focusA !== focusB) return focusA - focusB;
-        const statusWeight = (issue) => (issue.status === "in_progress" ? 0 : issue.status === "in_review" ? 1 : 2);
-        if (statusWeight(a) !== statusWeight(b)) return statusWeight(a) - statusWeight(b);
         return PRIORITIES.indexOf(a.priority) - PRIORITIES.indexOf(b.priority);
       })
       .slice(0, maxIssues);
@@ -961,6 +1000,118 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
     });
   }
 
+  /**
+   * A company whose board is empty stops being a company. Once something has
+   * shipped, the next cycle opens the follow-up the last review asked for —
+   * grounded in the goal metric, never invented scope.
+   */
+  function replenishBoard(company, { max = 2 } = {}) {
+    const open = company.issues.filter((issue) => OPEN_STATUSES.includes(issue.status));
+    const room = Math.min(max, 2 - open.length);
+    if (room <= 0) return [];
+    const goal = company.goals.find((entry) => entry.status === "active") ?? company.goals[0];
+    const shipped = company.issues.filter((issue) => issue.status === "done");
+    if (!goal || !shipped.length) return [];
+    // Follow-ups keep the company alive; an unbounded chain is a template
+    // chasing its own tail. Four is enough rhythm for a week of cycles.
+    if (company.issues.filter((issue) => (issue.labels ?? []).includes("follow-up")).length >= 4) return [];
+    const metric = goal.metric || "the goal metric";
+    const last = shipped[shipped.length - 1];
+    const lastReview = [...company.runs].reverse().find((run) => run.issueId === last.id && run.review?.follow_ups?.length);
+    const followUpText = lastReview?.review?.follow_ups?.[0];
+    const owner = company.agents.find((agent) => agent.role === "operator") ?? company.agents[0];
+    const templates = [
+      {
+        title: `Measure ${metric} after ${last.key} and record the number`,
+        priority: "high",
+        description: `Run the ${metric} check on what ${last.key} shipped, write the measured value next to the target (${goal.target}${goal.unit ? ` ${goal.unit}` : ""}) and say where the number came from.`,
+        acceptance: [`A measured ${metric} value with its source and timestamp`, "Compared to the target, with the gap named", "Linked to the goal so progress moves only on evidence"],
+      },
+      {
+        title: followUpText ? clip(followUpText, 76) : `Ship the follow-up ${last.key} asked for`,
+        priority: "medium",
+        description: `The review on ${last.key} left this next step: ${followUpText ?? "closing the gap it named"}. Close it, attach the artifact, and let the reviewer accept it against its criteria.`,
+        acceptance: ["The follow-up named in the last review is closed", "Artifact linked in the issue", "Reviewer verdict recorded"],
+      },
+      {
+        title: `Run the ${metric} check on a second real input`,
+        priority: "low",
+        description: `The first input proved the slice works once. Take a different real input through the same path and record latency, cost and the ${metric} result.`,
+        acceptance: ["A second, different real input used", "Latency and cost recorded on the run", "Any difference from the first input explained"],
+      },
+    ];
+    const existing = new Set(company.issues.map((issue) => issue.title.toLowerCase().slice(0, 40)));
+    const created = [];
+    for (const template of templates) {
+      if (created.length >= room) break;
+      if (existing.has(template.title.toLowerCase().slice(0, 40))) continue;
+      const issue = createIssue(company, {
+        ...template,
+        status: "todo",
+        assigneeId: owner?.id ?? null,
+        projectId: last.projectId ?? company.projects[0]?.id ?? null,
+        goalId: goal.id,
+        labels: ["follow-up"],
+        createdBy: "cycle",
+      });
+      company.issues.push(issue);
+      created.push(issue);
+    }
+    if (created.length) {
+      pushActivity(company, {
+        kind: "board.replenished",
+        actorId: owner?.id ?? "system",
+        subject: `${created.length} new issue${created.length === 1 ? "" : "s"}`,
+        detail: created.map((issue) => issue.title).join(" · "),
+      });
+      notify(company, { type: "board.replenished", payload: { issues: created.map((issue) => ({ id: issue.id, key: issue.key, title: issue.title })) } });
+      recomputeCompany(company);
+    }
+    return created;
+  }
+
+  /**
+   * Accepted work is the only thing worth remembering. It becomes one knowledge
+   * document (so retrieval can cite it next cycle) and one line of the agent's
+   * own memory (so the next run starts from what worked).
+   */
+  function remember(company, { agent, issue, verdict, deliverable }) {
+    const at = nowIso();
+    const lesson = clampText(String(verdict?.summary ?? "Shipped and accepted."), 240);
+    const memory = (agent.memory ?? []).filter((entry) => entry.issueId !== issue.id);
+    memory.unshift({ at, issueId: issue.id, issueKey: issue.key, title: issue.title, lesson });
+    agent.memory = memory.slice(0, 12);
+    if (!company.knowledge.some((doc) => doc.sourceIssueId === issue.id)) {
+      company.knowledge.unshift(
+        createKnowledge({
+          title: `${issue.key} — ${issue.title}`,
+          body: `${lesson}\n\n${clampText(deliverable, 2400)}`,
+          tags: ["shipped", ...(issue.labels ?? []).slice(0, 2)],
+          source: "agent",
+          sourceIssueId: issue.id,
+          agentId: agent.id,
+        }),
+      );
+    }
+    pushActivity(company, {
+      kind: "knowledge.shipped",
+      actorId: agent.id,
+      subject: issue.key,
+      detail: `Remembered: ${lesson}`,
+      issueId: issue.id,
+    });
+  }
+
+  /** How many work runs each issue has already had — the aging signal. */
+  function attemptCounts(company) {
+    const counts = new Map();
+    for (const run of company.runs) {
+      if (!run.issueId || run.kind === "plan" || run.kind === "standup") continue;
+      counts.set(run.issueId, (counts.get(run.issueId) ?? 0) + 1);
+    }
+    return counts;
+  }
+
   /* ------------------------------------------------------------ routines */
 
   async function runRoutine({ companyId, routineId }) {
@@ -973,15 +1124,63 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
       }
       const agent = findAgent(company, routine.agentId) ?? pickAgent(company, "operator");
       const retrieval = await searchKnowledge({ company, nim, query: routine.instruction.slice(0, 300) });
-      const result = await nim.chat({
-        model: agent?.model,
-        messages: [
-          { role: "system", content: `Task type: triage\n\nYou are running a scheduled routine at ${company.name}. Be brief and concrete.` },
-          { role: "user", content: `${routine.name}: ${routine.instruction}\n\n${renderContext(retrieval.passages)}` },
-        ],
-        temperature: 0.3,
-        maxTokens: 700,
-      });
+      // A routine costs money like anything else: it gets a run row and a ledger
+      // row, so "every call is billed" stays true for scheduled work too.
+      const run = {
+        id: newId("run"),
+        issueId: null,
+        agentId: agent?.id ?? null,
+        kind: "routine",
+        status: "running",
+        model: agent?.model ?? null,
+        simulated: nim.status().mode === "simulation",
+        startedAt: nowIso(),
+        endedAt: null,
+        usage: { prompt_tokens: 0, completion_tokens: 0 },
+        costCents: 0,
+        steps: [],
+        output: "",
+        review: null,
+        error: null,
+        routineId: routine.id,
+      };
+      company.runs.unshift(run);
+      const result = await withUsageContext(
+        {
+          companyId,
+          runId: run.id,
+          agentId: agent?.id ?? null,
+          sink: (usageEvent) => {
+            const row = recordLedger(company, {
+              runId: run.id,
+              agentId: agent?.id ?? null,
+              model: usageEvent.model,
+              usage: usageEvent.usage,
+              cost: usageEvent.cost,
+              endpoint: usageEvent.endpoint,
+              simulated: usageEvent.simulated,
+            });
+            run.costCents += row.costCents;
+            notify(company, { type: "ledger.recorded", payload: { row, runId: run.id } });
+          },
+        },
+        () =>
+          nim.chat({
+            model: agent?.model,
+            messages: [
+              { role: "system", content: `Task type: triage\n\nYou are running a scheduled routine at ${company.name}. Be brief and concrete.` },
+              { role: "user", content: `${routine.name}: ${routine.instruction}\n\n${renderContext(retrieval.passages)}` },
+            ],
+            temperature: 0.3,
+            maxTokens: 700,
+          }),
+      );
+      run.usage.prompt_tokens += result.usage?.prompt_tokens ?? 0;
+      run.usage.completion_tokens += result.usage?.completion_tokens ?? 0;
+      run.status = "succeeded";
+      run.endedAt = nowIso();
+      run.output = String(result.text ?? "").slice(0, 2000);
+      run.agentName = agent?.name ?? "system";
       routine.runs = (routine.runs ?? 0) + 1;
       routine.lastRunAt = nowIso();
       routine.nextRunAt = new Date(Date.now() + routine.cadenceMinutes * 60_000).toISOString();
@@ -996,8 +1195,8 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
         meta: { routineId: routine.id },
       });
       recomputeCompany(company);
-      emit(companyId, { type: "routine.ran", payload: { routine, text: result.text } });
-      return { routine, text: result.text };
+      emit(companyId, { type: "routine.ran", payload: { routine, runId: run.id, text: result.text } });
+      return { routine, run, text: result.text };
     });
   }
 
@@ -1013,12 +1212,23 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
     const tick = async () => {
       const current = store.getCompany(companyId);
       if (!current?.settings.autoMode) return;
-      if ((current.cycleHistory?.length ?? 0) >= (current.settings.maxCycles ?? 3)) {
+      const cap = Number(current.settings.maxCycles ?? 0);
+      if (cap > 0 && (current.cycleHistory?.length ?? 0) >= cap) {
         current.settings.autoMode = false;
         store.saveCompany(current);
         stopAuto(companyId);
         emit(companyId, { type: "auto.stopped", payload: { reason: "maxCycles reached" } });
         return;
+      }
+      // Routines are the company's heartbeat: dispatch whatever came due before
+      // planning new work, otherwise nextRunAt is written and nothing ever fires.
+      try {
+        const due = (current.routines ?? [])
+          .filter((routine) => !routine.nextRunAt || new Date(routine.nextRunAt).getTime() <= Date.now())
+          .slice(0, 2);
+        for (const routine of due) await runRoutine({ companyId, routineId: routine.id });
+      } catch (error) {
+        emit(companyId, { type: "auto.error", payload: { error: error.message, phase: "routine" } });
       }
       try {
         await planCycle({ companyId, maxIssues: 2, auto: true });

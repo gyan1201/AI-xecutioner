@@ -165,25 +165,31 @@ function deliverable(prompt, random) {
 function plan(prompt) {
   const goalMatch = prompt.match(/Goal:\s*(.+)/i);
   const goal = goalMatch?.[1]?.trim() ?? "Grow the business";
-  const random = rng(hash32(goal));
   const open = [...prompt.matchAll(/^\s*\d+\.\s*(.+)$/gm)]
     .map((match) => match[1].trim())
-    // Board lines look like "[todo/high] Title — Owner"; the model must echo the bare title.
-    .map((line) => line.replace(/^\[[^\]]*\]\s*/, "").replace(/\s+—\s+[^—]*$/, "").trim())
+    // Board lines look like "[todo/high] Title — Owner (2 runs)"; the model must echo the bare title.
+    .map((line) => line.replace(/^\[[^\]]*\]\s*/, "").replace(/\s+—\s+[^—]*$/, "").replace(/\s+\(\d+ runs?\)$/, "").trim())
     .filter(Boolean)
     .slice(0, 8);
-  const focus = pick(
-    [
-      "Unblock revenue: finish the two activation fixes and ship pricing this cycle.",
-      "Cut cycle time in half before adding scope.",
-      "Convert the strongest signal in the backlog into a measurable experiment.",
-      "Protect quality: close the review debt, then take one bet.",
-    ],
-    random,
-  );
+  // The plan has to change when the board changes: seeding on the goal alone made
+  // every cycle restate the same focus, which is exactly what a template does.
+  const cycle = Number(prompt.match(/Cycle #(\d+)/i)?.[1] ?? 0);
+  const random = rng(hash32(`${goal}|${open.join("|")}|${cycle}`));
+  const top = open.slice(0, 3);
+  const focus = top.length
+    ? pick(
+        [
+          `Ship "${top[0]}" and prove it against its acceptance criteria.`,
+          `Take "${top[0]}" end to end this cycle, with ${top[1] ? `"${top[1]}"` : "the next item"} queued behind it.`,
+          `Measure "${top[0]}" first: the baseline has to exist before more work lands on the board.`,
+        ],
+        random,
+      )
+    : "Settle the goal metric and baseline before spending more money.";
+  const owners = ["Operator", "Critic", "Strategist"];
   const assignments = (open.length ? open : ["Draft the plan", "Run the experiment", "Review the result"]).map((title, index) => ({
     title,
-    owner: ["Strategist", "Operator", "Analyst", "Critic"][index % 4],
+    owner: owners[index % owners.length],
     why: pick(
       [
         "Highest expected impact on the goal and cheapest to validate.",
@@ -198,7 +204,7 @@ function plan(prompt) {
   return JSON.stringify(
     {
       focus,
-      rationale: `The goal "${goal}" is currently limited by unvalidated demand and review debt. This cycle converts both into evidence the board can act on, and keeps spend inside the monthly cap.`,
+      rationale: `Cycle ${cycle + 1}: the goal "${goal}" is limited by unvalidated work on the board, so this cycle moves the oldest unfinished item to a verdict instead of opening new scope.`,
       assignments,
       risks: [
         "Model spend can outrun the monthly cap if every issue is retried twice.",
@@ -206,61 +212,6 @@ function plan(prompt) {
         "Without a metric owner the results will not be trusted next cycle.",
       ],
       citations: ["knowledge/company-brief.md", "issues/backlog", "ledger/this-month"],
-    },
-    null,
-    2,
-  );
-}
-
-function review(prompt) {
-  const ctx = contextFrom(prompt);
-  const attempt = Number(prompt.match(/Review attempt:\s*(\d+)/i)?.[1] ?? 1);
-  const random = rng(hash32(`${ctx.title}:review:${attempt}`));
-  // First pass usually needs one round of evidence; a rework should pass.
-  const score = attempt > 1 ? 80 + Math.floor(random() * 16) : 62 + Math.floor(random() * 33);
-  const verdict = score >= 78 ? "accepted" : "changes_requested";
-  return JSON.stringify(
-    {
-      verdict,
-      score,
-      summary:
-        verdict === "accepted"
-          ? `Meets the definition of done for "${ctx.title}". Evidence is specific and the numbers line up with the ledger.`
-          : `Close, but "${ctx.title}" needs a tighter evidence trail before it can be accepted.`,
-      findings: [
-        {
-          severity: "minor",
-          finding: "Claims are correct but two of them lack a source link.",
-          fix: "Link the dashboard and the experiment record inline.",
-        },
-        {
-          severity: verdict === "accepted" ? "nit" : "major",
-          finding: "The success metric is stated but no baseline is shown.",
-          fix: `Add the pre-change value next to the target (baseline ${ctx.baseline[0]}).`,
-        },
-      ],
-      follow_ups: [ctx.next],
-    },
-    null,
-    2,
-  );
-}
-
-function triage(prompt) {
-  const random = rng(hash32(prompt.slice(0, 120)));
-  const titles = [...prompt.matchAll(/^\s*[-*]\s+(?:#?\d+\s+)?(.{8,90})$/gm)].map((m) => m[1].trim()).slice(0, 5);
-  return JSON.stringify(
-    {
-      summary: pick(
-        [
-          "Two items are ready to start; one is blocked on access; the rest need a decision from the board.",
-          "Nothing is on fire. The highest-leverage move is finishing the item already in progress.",
-          "The queue is healthy but two items have drifted from their definition of done.",
-        ],
-        random,
-      ),
-      blockers: ["Need production read access for the operator", "Approval pending on the public announcement"],
-      recommended: (titles.length ? titles : ["Close the review debt"]).map((title) => ({ title, why: "Closest to done with the smallest spend." })),
     },
     null,
     2,
@@ -285,6 +236,79 @@ function genericChat(prompt, { system = "" } = {}) {
     ? cites.map((sentence) => `- ${sentence}`).join("\n")
     : "- The evidence we have is directionally right but thin on the counterfactual.\n- The cheapest next step is a two-week test with a single success metric.\n- If the metric moves, fund the follow-up; if it does not, stop.";
   return `${opener}\n\n**What the record says**\n${body}\n\n**What I would do**\n1. Name the metric and the owner before spending another token.\n2. Ship the smallest version that can fail.\n3. Bring the number back to this thread, not a slide deck.\n\n_Answering "${question.replace(/\s+/g, " ").slice(0, 120)}"._`;
+}
+
+function triage(prompt) {
+  const random = rng(hash32(prompt.slice(0, 120)));
+  const titles = [...prompt.matchAll(/^\s*[-*]\s+(?:#?\d+\s+)?(.{8,90})$/gm)].map((m) => m[1].trim()).slice(0, 5);
+  return JSON.stringify(
+    {
+      summary: pick(
+        [
+          "Two items are ready to start; one is blocked on access; the rest need a decision from the board.",
+          "Nothing is on fire. The highest-leverage move is finishing the item already in progress.",
+          "The queue is healthy but two items have drifted from their definition of done.",
+        ],
+        random,
+      ),
+      blockers: ["Need production read access for the operator", "Approval pending on the public announcement"],
+      recommended: (titles.length ? titles : ["Close the review debt"]).map((title) => ({ title, why: "Closest to done with the smallest spend." })),
+    },
+    null,
+    2,
+  );
+}
+
+function review(prompt) {
+  const ctx = contextFrom(prompt);
+  const attempt = Number(prompt.match(/Review attempt:\s*(\d+)/i)?.[1] ?? 1);
+  const deliverable = prompt.split(/Deliverable by [^:]*:/i)[1] ?? prompt;
+  // Score the evidence, not the dice: a reviewer that accepts at random teaches
+  // the company nothing. Each check is something the acceptance criteria ask for.
+  const rubric = [
+    /###\s*objective/i,
+    /###\s*numbers/i,
+    /\|\s*metric\s*\|/i,
+    /\bbaseline\b/i,
+    /\bcost\b/i,
+    /\blatency\b/i,
+    /###\s*risks/i,
+    /###\s*next step/i,
+  ];
+  const passed = rubric.filter((check) => check.test(deliverable)).length;
+  const jitter = Math.floor(rng(hash32(`${ctx.title}:review:${attempt}`))() * 5);
+  const score = Math.min(100, 52 + passed * 5 + (attempt > 1 ? 4 : 0) + jitter);
+  const verdict = score >= 78 ? "accepted" : "changes_requested";
+  const missing = rubric.length - passed;
+  return JSON.stringify(
+    {
+      verdict,
+      score,
+      summary:
+        verdict === "accepted"
+          ? `Meets the definition of done for "${ctx.title}". ${passed}/${rubric.length} evidence checks passed and the numbers line up with the ledger.`
+          : `Close, but "${ctx.title}" needs a tighter evidence trail: ${missing} of ${rubric.length} evidence checks are missing.`,
+      findings: [
+        ...(passed < rubric.length
+          ? [
+              {
+                severity: verdict === "accepted" ? "nit" : "major",
+                finding: "Not every required section is filled with a number and a source.",
+                fix: "Add the missing section with the measured value and where it came from.",
+              },
+            ]
+          : []),
+        {
+          severity: "nit",
+          finding: "The success metric is stated but the baseline could be more prominent.",
+          fix: `Put the pre-change value next to the target (baseline ${ctx.baseline[0]}).`,
+        },
+      ],
+      follow_ups: [ctx.next],
+    },
+    null,
+    2,
+  );
 }
 
 function standup(prompt) {

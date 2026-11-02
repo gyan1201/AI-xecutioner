@@ -1,6 +1,6 @@
 # Paperclip × NVIDIA NIM
 
-A working clone of [Paperclip](https://github.com/paperclipai/paperclip) — the "company of AI agents" control room — rebuilt so that **every agent, skill, blueprint and model call runs on the NVIDIA NIM surface**: the models catalog, the 430-skill library, the 36 reference blueprints, and the raw inference endpoints behind them.
+A working clone of [Paperclip](https://github.com/paperclipai/paperclip) — the "company of AI agents" control room — rebuilt so that **every agent, skill, blueprint and model call runs on the NVIDIA NIM surface**: the models catalog, the 430-skill library, the 36 reference blueprints (plus a Physical AI cell of our own), and the raw inference endpoints behind them.
 
 Zero runtime dependencies. One Node process. Data on disk. Runs offline in a deterministic simulation, and switches to real `integrate.api.nvidia.com` inference the moment you add a key.
 
@@ -47,13 +47,25 @@ Paste that into **Settings → Quick Setup via Code Snippet** (or **Models → A
 The first screen asks for two things — **what the company is called** and **what it is for** — and takes a model key if you have one. Press one button and Paperclip does the rest:
 
 1. **Configures every key you paste.** A raw key or a whole Python/cURL snippet, one per line; the provider is detected, verified when the network allows, and recorded. Skip it and the company still runs in simulation.
-2. **Picks the blueprint that fits the goal.** All 36 NVIDIA blueprints are ranked against the brief (curated domain intents + weighted lexical overlap), so “screen every online order for fraud” lands on Retail Loss Prevention rather than the nearest keyword coincidence. With a live key, the strategist model drafts the org instead and the draft is validated before it is used.
-3. **Hires the team.** Roles, titles and models come from the blueprint; template names are replaced with real ones, and every agent gets two NVIDIA skills that match the work.
+2. **Picks the blueprint that fits the goal.** All 37 blueprints are ranked against the brief (curated domain intents + weighted lexical overlap), so “screen every online order for fraud” lands on Retail Loss Prevention rather than the nearest keyword coincidence. With a live key, the strategist model drafts the org instead and the draft is validated before it is used.
+3. **Hires the team.** Roles, titles and models come from the blueprint; template names are replaced with real ones, and every agent gets two NVIDIA skills chosen for *its own* title and domain — a support architect and a support QA lead do not carry the same pair.
 4. **Writes the backlog.** A metric-and-baseline issue, an issue per NIM endpoint family the company needs, the blueprint's build steps, and a review gate — each with acceptance criteria, so “done” is checkable.
 5. **Runs the first cycle.** The strategist plans, the team works, quality reviews, the ledger records every call, and the standup is written from the real results.
 6. **Hands you the company.** The report shows the steps, the first cycle's verdict and the spend, with one click into the dashboard. Optionally it is left in autonomous mode.
 
 `POST /api/launch` streams those steps over SSE (`?stream=1`), so the launcher is a live checklist rather than a spinner. Everything it creates is ordinary company state: edit the team, replan the backlog, run cycles by hand — nothing is hidden behind the generator.
+
+### What the company does after launch
+
+A launch is only the first second of a company, so the loop that follows is where the work is:
+
+* **The goal is the user's sentence.** *"Cut support response time to under five minutes"* becomes metric `support response time`, unit `min`, target `5`, direction `decrease`. Mixed units are converted (`from 6 weeks to 5 days` → baseline 42 days), `instead of` sentences are read backwards, and a percentage reduction beats an unrelated target later in the same sentence. When no baseline is stated, the baseline stays **unmeasured** rather than being invented as zero, and the first issue is the one that goes and measures it.
+* **Progress is computed, never asserted.** A goal's percentage is the share of its linked work that a reviewer accepted. There is no field an agent can write to claim the metric moved; the issue has to ship and be accepted first.
+* **The standup is a heartbeat.** Routines are dispatched at the start of every cycle *and* on the autonomous tick, cadence follows the company's cycle length, and the first run is due at launch — `nextRunAt` on its own used to mean nothing ever fired.
+* **Work is scheduled fairly.** The next cycle takes the issues with the fewest runs (then the ones untouched longest) before it considers priority, so a `low` review gate can no longer starve behind two `high` items forever.
+* **The board refills.** When everything has shipped, the next cycle opens grounded follow-up work — measure the metric now that something ships, close the next step the last review named — capped so the company keeps a rhythm instead of a template chasing its own tail.
+* **Accepted work is remembered.** A review verdict of `accepted` writes one knowledge document (so retrieval can cite it next cycle) and one line of that agent's memory, replayed in its system prompt on the next run. The agent's **Memory** tab shows exactly what was written, when, and from which issue — the model cannot write there itself.
+* **Planning adapts.** The strategist sees the cycle number, last cycle's focus and how many runs each issue has had, and is asked for a different focus; in simulation the planner is seeded on the board itself, not on the goal string alone.
 
 | | |
 | --- | --- |
@@ -123,9 +135,11 @@ The snapshot is built from the real `GET /v1/models` payload plus curated metada
 
 A skill is not a badge in this app. Assigning one appends its scope and instructions to the agent's system prompt, and the run trace records which skills were in play — so *"which instructions produced this answer"* is answerable. `GET /api/skills/suggest?q=…` scores the catalog against an issue and proposes the three skills worth attaching.
 
-### Blueprints — all 36 reference architectures
+### Blueprints — all 36 reference architectures, plus a physical-AI cell
 
 From `build.nvidia.com/blueprints`: AI-Q research assistant, DocsFab, RAG with NeMo Retriever, Deep Agents on Nemotron 3 Ultra, GQE GPU SQL, molecular design with BioNeMo, AI-factory SRE root-cause, self-improving Hermes agents, trading-strategy discovery, and the rest.
+
+The reference set has no robotics pipeline, so `physical-ai-robotics` is written here: teleoperation episodes → manipulation policy → sim replay → one real cell behind a human safety gate, staffed by a program lead, a perception/teleop engineer, a policy trainer and a sim-to-real safety reviewer. It is what a “cut pick-and-place deployment from 6 weeks to 5 days” brief lands on.
 
 Each blueprint ships a team (names, titles, roles, models, budgets), a goal with a real metric, a backlog with acceptance criteria, and a pipeline trace of the NIM functions it needs. **Deploy** turns it into a staffed company with a goal, a board and — optionally — an immediate first cycle.
 
@@ -134,6 +148,33 @@ The five healthcare and biology blueprints — ambient clinical scribe, medical 
 | Healthcare AI — the documentation metric | The two clinical pods |
 | --- | --- |
 | ![Healthcare dashboard](docs/screenshot-healthcare-dashboard.jpg) | ![Clinical org chart](docs/screenshot-healthcare-team.jpg) |
+
+---
+
+## Run the example company yourself
+
+`npm run bench` launches **Signal Desk** from one sentence — *"Cut support response time to under five minutes with an AI triage copilot that cites the policy it used"* — into a throwaway data dir (`.bench-data/`, never `./data`), runs five cycles, and prints the numbers plus a pass/fail verdict for each:
+
+```
+launched Signal Desk (co_signal_desk_d3y) in 57 ms
+blueprint: Customer Service Voice Agent (Agentic AI)
+goal: support response time unmeasured → 5 min (decrease)
+  - Noah Bergström · Solution Architect · nvidia/nemotron-3-ultra-550b-a55b · rag-blueprint, nemotron-voice-agent-builder
+  - Idris Bello · Implementation Engineer · nvidia/nemotron-3-super-120b-a12b · nemotron-asr-finetune, cdf-curation-and-retrieval
+  - Aisha Rahman · Quality Lead · nvidia/nemotron-3-super-120b-a12b · rag-eval, rag-perf
+
+work runs: 10 · accepted 10 · rework 0 · accept rate 100%
+shipped: 10/10 · artifacts 10 · spend $0.08 · $0.01 per shipped issue
+routines: Cycle standup: 2 runs (every 5m)
+goal: support response time · baseline unmeasured → 5 min · progress {"accepted":10,"total":10,"pct":100}
+knowledge docs: 11 · agent memory: 2/3
+ledger rows: 110 · simulated only: true
+12/12 checks
+```
+
+The full transcript is in [docs/example-company-run.txt](docs/example-company-run.txt). Every row is simulated (`simulated: true`), because the sandbox has no NVIDIA egress — `npm run bench` forces simulation on purpose, so the numbers are a product benchmark, not a claim of billed inference.
+
+Against the same brief before this work: 5/6 shipped, 63% first-pass accept, **1.20¢ per shipped issue**, 0 routines fired, goal stuck at `0/3` with metric `accepted deliverables`, one issue never run once, and all three hires carrying the same two skills.
 
 ---
 
@@ -149,10 +190,10 @@ The Paperclip loop, intact, with NVIDIA as the only model provider:
 * **Cycle runner** — the strategist reads goals and the board, returns a plan with focus, assignments and risks, the top issues run, and a scribe writes the standup from the real results.
 * **Agents** — roster tiles, hire modal (role, reporting line, model, remit, capabilities, budget, skills), per-agent profile with 14-day spend, assigned issues, run history, live chat with citations/tools/cost, skills, instructions and runtime knobs.
 * **Org chart** — the reporting tree plus roster economics.
-* **Goals / Projects / Routines** — metric targets, containers, and scheduled prompts you can run on demand.
+* **Goals / Projects / Routines** — metric targets read from the goal sentence (with a unit and a direction), containers, and scheduled prompts. The standup routine follows the company's cycle length and its first run is due at launch, so a cycle actually dispatches it.
 * **Spend** — 4 stat cards, a 14-day spend chart, spend by model, the per-agent spend table with optional caps, and the full ledger. Each row records whether the call was **simulated**, so a demo never looks like billed inference.
 * **Activity** — kind-filtered audit trail with the raw event drawer.
-* **Knowledge** — documents embedded with a NIM embedding model, chunked and reranked before every agent context, plus a retrieval playground that shows embed and rerank scores side by side.
+* **Knowledge** — documents embedded with a NIM embedding model, chunked and reranked before every agent context, plus a retrieval playground that shows embed and rerank scores side by side. Every accepted issue adds one shipped-work document, tagged with its issue and agent.
 
 Guardrails and approvals are enforced in the engine, not the UI: an output that fails the safety NIM is stopped, and an approval policy of `high` parks risky work in the inbox. **Spend is tracked but not capped by default** — every call still writes a ledger row, and a positive cap re-enables the gate (a run over cap is then blocked with a reason).
 
@@ -180,7 +221,7 @@ server/
     client.mjs         one adapter per endpoint family + raw passthrough
     sim.mjs            deterministic simulator (hash-seeded, no network)
     skills.mjs         430-skill catalog + search + suggestions
-    blueprints.mjs     36 blueprints → deployable plans
+    blueprints.mjs     37 blueprints → deployable plans
     usage.mjs          AsyncLocalStorage usage context → ledger rows
     intake.mjs         credential parsing (paste a key, env line or curl snippet)
 web/

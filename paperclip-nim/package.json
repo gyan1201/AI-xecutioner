@@ -13,6 +13,7 @@
     "test": "node --test test/*.test.mjs",
     "check": "node --check server/index.mjs",
     "sync:skills": "node scripts/sync-skills.mjs",
-    "sync:models": "node scripts/sync-models.mjs"
+    "sync:models": "node scripts/sync-models.mjs",
+    "bench": "node scripts/example-company.mjs"
   }
 }

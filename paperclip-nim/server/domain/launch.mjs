@@ -16,7 +16,7 @@
  */
 
 import { DEFAULT_BLUEPRINT_ID, getBlueprint, planBlueprint, rankBlueprints } from "../nim/blueprints.mjs";
-import { suggestSkills } from "../nim/skills.mjs";
+import { suggestSkillsForRole } from "../nim/skills.mjs";
 
 const ROLES = ["strategist", "operator", "analyst", "critic"];
 const PRIORITIES = ["urgent", "high", "medium", "low"];
@@ -30,6 +30,111 @@ const clip = (text, max) => {
 export function goalTitle(goal) {
   const first = String(goal ?? "").trim().split(/(?<=[.!?])\s+/)[0] ?? "";
   return clip(first || goal, 132) || "Ship the first measurable win";
+}
+
+/* ------------------------------------------------------------- metrics */
+
+const NUMBER_WORDS = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, fifty: 50,
+  sixty: 60, seventy: 70, eighty: 80, ninety: 90, hundred: 100, half: 0.5,
+};
+
+const UNITS = [
+  { test: /^(ms|msec|milliseconds?)$/, label: "ms", seconds: 0.001 },
+  { test: /^(s|sec|secs|seconds?)$/, label: "sec", seconds: 1 },
+  { test: /^(m|min|mins|minutes?)$/, label: "min", seconds: 60 },
+  { test: /^(h|hr|hrs|hours?)$/, label: "h", seconds: 3600 },
+  { test: /^(d|day|days?)$/, label: "d", seconds: 86_400 },
+  { test: /^(w|wk|wks|weeks?)$/, label: "wk", seconds: 604_800 },
+  { test: /^(mo|mos|months?)$/, label: "mo", seconds: 2_592_000 },
+  { test: /^(%|pct|percent)$/, label: "%", seconds: null },
+];
+
+const unitFor = (token) => UNITS.find((unit) => unit.test.test(String(token ?? "").toLowerCase())) ?? null;
+
+function numbersIn(text) {
+  return String(text)
+    .replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|half)\b/gi,
+      (word) => String(NUMBER_WORDS[word.toLowerCase()]))
+    .replace(/\ba couple of\b/gi, "2");
+}
+
+const METRIC_STOP = new Set([
+  "cut", "reduce", "lower", "bring", "get", "ship", "make", "drive", "take", "move", "improve", "increase", "decrease",
+  "slash", "halve", "help", "keep", "keeping", "while", "so", "that", "which", "instead", "from", "to", "under", "below",
+  "less", "than", "within", "in", "by", "per", "of", "for", "with", "and", "or", "a", "an", "the", "our", "their", "its",
+  "at", "on", "into", "down", "up", "we", "us", "is", "are", "be", "can", "should", "must",
+]);
+
+/** The noun phrase immediately before the first number: "support response time". */
+function metricName(text) {
+  const words = numbersIn(String(text ?? "")).toLowerCase().replace(/[^a-z0-9%.\s]/g, " ").split(/\s+/).filter(Boolean);
+  const index = words.findIndex((word) => /^\d/.test(word) || unitFor(word));
+  if (index < 0) return "";
+  const before = words
+    .slice(Math.max(0, index - 5), index)
+    .filter((word) => !METRIC_STOP.has(word) && !unitFor(word) && !/^\d/.test(word) && word.length > 1);
+  return before.slice(-3).join(" ");
+}
+
+/**
+ * Read a measurable goal out of the sentence a user typed.
+ *
+ * "Cut support response time to under five minutes" has no baseline, and
+ * "from 6 weeks to 5 days" mixes units — both are common, and both are the
+ * difference between a real metric and "accepted deliverables".
+ */
+export function deriveGoal(goalText) {
+  const raw = String(goalText ?? "").trim();
+  if (!raw) return null;
+  const text = numbersIn(raw.toLowerCase().replace(/\s+/g, " "));
+  const metric = metricName(raw);
+
+  const pair = text.match(/from\s+(\d+(?:\.\d+)?)\s*([a-z%]+)?\s*(?:to|down to|into)\s*(?:under\s+|below\s+|less than\s+)?(\d+(?:\.\d+)?)\s*([a-z%]+)?/);
+  const reversed = pair ? null : text.match(/(\d+(?:\.\d+)?)\s*([a-z%]+)\s+instead of\s+(\d+(?:\.\d+)?)\s*([a-z%]+)/);
+  const percent = text.match(/(?:by|cut by|reduce by|lower by)\s+(\d+(?:\.\d+)?)\s*(?:%|percent|pct)/);
+  const single = text.match(/(?:to|under|below|less than|within|in under|inside|at)\s+(\d+(?:\.\d+)?)\s*([a-z%]+)/);
+
+  const finish = (values) => ({
+    metric: metric || "time to result",
+    ...values,
+    note: values.baseline === null
+      ? "target read from the goal sentence; the baseline is measured by the first issue"
+      : "baseline and target read from the goal sentence",
+  });
+
+  if (pair || reversed) {
+    const match = pair ?? reversed;
+    const targetToken = pair ? { value: match[3], unit: match[4] ?? match[2] } : { value: match[1], unit: match[2] };
+    const baselineToken = pair ? { value: match[1], unit: match[2] } : { value: match[3], unit: match[4] };
+    const targetUnit = unitFor(targetToken.unit) ?? unitFor(baselineToken.unit);
+    const baselineUnit = unitFor(baselineToken.unit) ?? targetUnit;
+    const target = Number(targetToken.value);
+    let baseline = Number(baselineToken.value);
+    if (!targetUnit || !Number.isFinite(target) || target <= 0 || !Number.isFinite(baseline)) return null;
+    if (targetUnit.seconds && baselineUnit?.seconds && targetUnit.label !== baselineUnit.label) {
+      baseline = (baseline * baselineUnit.seconds) / targetUnit.seconds;
+    }
+    baseline = Math.round(baseline * 100) / 100;
+    return finish({ unit: targetUnit.label, baseline, target, direction: target <= baseline ? "decrease" : "increase" });
+  }
+
+  // A percentage reduction wins when it is stated before any other target.
+  if (percent && (!single || percent.index < single.index)) {
+    const drop = Number(percent[1]);
+    if (!Number.isFinite(drop) || drop <= 0 || drop >= 100) return null;
+    return finish({ unit: "%", baseline: 100, target: Math.round((100 - drop) * 100) / 100, direction: "decrease" });
+  }
+
+  if (single) {
+    const unit = unitFor(single[2]);
+    const target = Number(single[1]);
+    if (!unit || !Number.isFinite(target) || target <= 0) return null;
+    return finish({ unit: unit.label, baseline: null, target, direction: unit.seconds ? "decrease" : "increase" });
+  }
+
+  return null;
 }
 
 export function issuePrefixFor(name) {
@@ -116,9 +221,12 @@ export function planFromBlueprint(blueprint, { companyName = "", goal = "", issu
   const functions = (blueprint.functions ?? []).join(", ");
 
   // Team: keep the blueprint's roles/models, replace template names, and give
-  // every agent two NVIDIA skills that match what the company actually does.
+  // every agent two NVIDIA skills chosen for *its own* job — otherwise the whole
+  // roster arrives carrying the same generic pair and reads like a template.
   const taken = new Set();
-  const skillText = `${blueprint.name} ${blueprint.category} ${blueprint.summary} ${functions} ${brief}`;
+  const usedSkills = new Set();
+  const domain = `${blueprint.name} ${blueprint.category} ${functions}`;
+  const skillText = `${blueprint.summary} ${brief}`;
   const agents = plan.agents.map((agent, index) => {
     const named = GENERIC_NAMES.has(agent.name) ? realName(blueprint.id, index, taken) : agent.name;
     taken.add(named);
@@ -126,7 +234,7 @@ export function planFromBlueprint(blueprint, { companyName = "", goal = "", issu
       ...agent,
       name: named,
       description: `${agent.title} at ${companyName || "this company"}.`,
-      skills: suggestSkills({ text: skillText, limit: 2 }).map((skill) => skill.id).slice(0, 2),
+      skills: suggestSkillsForRole({ title: agent.title, role: agent.role, domain, text: skillText, used: usedSkills, limit: 2 }),
       instructions: [
         agent.instructions,
         `Company goal: ${clip(context, 400)}`,
@@ -140,15 +248,16 @@ export function planFromBlueprint(blueprint, { companyName = "", goal = "", issu
   const critic = agents.find((agent) => agent.role === "critic") ?? agents[agents.length - 1];
   const indexOf = (agent) => Math.max(agents.indexOf(agent), 0);
   const goalLine = clip(context, 400);
+  const goalPlan = buildGoal(plan.goal, { title, context, source: brief });
   const labels = [blueprint.category.toLowerCase().replace(/[^a-z0-9]+/g, "-"), "full-auto"];
 
   // Backlog: the decisions only the goal can settle, then the blueprint's own
   // concrete steps, then a review gate that defines done.
   const composed = [
     {
-      title: `Lock the metric and baseline for: ${clip(title, 96)}`,
+      title: `Lock the baseline for ${clip(goalPlan.metric || blueprint.name, 60)}`,
       priority: "urgent",
-      description: `This team exists to ${goalLine ? `achieve this: ${goalLine}` : `deliver ${blueprint.name}`}. Pick the single number that proves progress, write down today's value with its source, and say how often it is measured. Blueprint metric: ${plan.goal.metric} ${plan.goal.target}${plan.goal.unit ? ` ${plan.goal.unit}` : ""}.`,
+      description: `This team exists to ${goalLine ? `achieve this: ${goalLine}` : `deliver ${blueprint.name}`}. The target is ${goalPlan.metric} ${goalPlan.baseline === null || goalPlan.baseline === undefined ? "measured from today" : goalPlan.baseline} → ${goalPlan.target}${goalPlan.unit ? ` ${goalPlan.unit}` : ""}. Write down today's value with its source and how often it is measured.`,
       acceptance: ["Metric named with an exact definition", "Baseline value with a source and a date", "Owner and measurement cadence agreed"],
       labels: ["foundation", ...labels],
       ownerIndex: indexOf(strategist),
@@ -195,14 +304,38 @@ export function planFromBlueprint(blueprint, { companyName = "", goal = "", issu
       category: blueprint.category,
       functions: blueprint.functions,
     },
-    goal: {
-      ...plan.goal,
-      title,
-      description: context,
-      metric: plan.goal.metric || "accepted deliverables",
-    },
+    goal: goalPlan,
     agents,
     issues: composed,
+  };
+}
+
+
+/**
+ * A blueprint with a curated metric keeps it (the healthcare blueprints know
+ * their own units). Everything else reads the metric out of the goal sentence,
+ * and only falls back to the placeholder when the sentence has no number in it.
+ */
+export function buildGoal(blueprintGoal, { title, context, source }) {
+  const derived = deriveGoal(source ?? context);
+  // The number the user typed wins: it is the only target the company is
+  // actually accountable to. A blueprint's curated metric is the fallback for
+  // goals with no number in them, and the placeholder is the last resort.
+  if (derived) {
+    const unit = derived.unit ?? blueprintGoal?.unit ?? null;
+    const direction =
+      derived.direction ??
+      (blueprintGoal?.unit === unit ? blueprintGoal?.direction : undefined) ??
+      null;
+    return { ...derived, unit, direction, title, description: context };
+  }
+  const curated = blueprintGoal?.metric && blueprintGoal.metric !== "accepted deliverables";
+  if (curated) return { ...blueprintGoal, title, description: context };
+  return {
+    ...blueprintGoal,
+    title,
+    description: context,
+    metric: blueprintGoal?.metric || "accepted deliverables",
   };
 }
 
