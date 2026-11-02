@@ -68,6 +68,16 @@ function hintsForStatus(status) {
   }
 }
 
+function networkHint(error) {
+  const cause = error?.cause?.code || error?.cause?.message || error?.code || "";
+  const text = String(cause);
+  if (/ENOTFOUND|EAI_AGAIN/i.test(text)) return "DNS failed: this host cannot resolve NVIDIA. Check DNS or the configured base URL.";
+  if (/ECONNREFUSED/i.test(text)) return "Connection refused: nothing is listening at that base URL. Check NVIDIA_BASE_URL / the local NIM container.";
+  if (/CERT|SSL|TLS|EPROTO/i.test(text)) return "TLS failed mid-handshake: egress to NVIDIA is blocked by a proxy or firewall on this host.";
+  if (/ETIMEDOUT|ECONNRESET|EHOSTUNREACH|ENETUNREACH/i.test(text)) return "The network dropped the connection: egress to NVIDIA is blocked or very slow on this host.";
+  return "The request never reached NVIDIA. Check egress/proxy rules for integrate.api.nvidia.com; the key itself was not rejected.";
+}
+
 function normalizeError(error, context) {
   if (error?.name === "AbortError") return error;
   if (error instanceof NimError) return error;
@@ -79,8 +89,9 @@ function normalizeError(error, context) {
     });
   }
   return new NimError(error?.message || `NVIDIA request failed while ${context}.`, {
-    code: error?.code || "network_error",
+    code: error?.cause?.code || error?.code || "network_error",
     retryable: true,
+    hint: networkHint(error),
   });
 }
 

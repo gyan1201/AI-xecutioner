@@ -2,6 +2,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { ROOT } from "./config.mjs";
 import { maskKey, parseCredentialText, pickDefaultModel, verifyCredential } from "./keyintake.mjs";
+import { parseSnippet, runSnippet } from "./snippets.mjs";
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -433,6 +434,39 @@ export function createApp(runtime, { broadcast = () => {} } = {}) {
       maxTokens: body.maxTokens,
       temperature: body.temperature,
     });
+  });
+
+  /* -------------------------------- snippets -------------------------------- */
+
+  /** Parse a pasted request snippet without calling NVIDIA. */
+  route("POST", "/api/snippets/parse", async ({ body }) => {
+    const text = typeof body.text === "string" ? body.text : typeof body.snippet === "string" ? body.snippet : "";
+    const snippet = parseSnippet(text);
+    return {
+      ...snippet,
+      defaultModel: runtime.defaultChatModel?.() ?? null,
+    };
+  });
+
+  /** Run the exact request the operator pasted, through the app's NIM client. */
+  route("POST", "/api/snippets/run", async ({ body }) => {
+    const text = typeof body.text === "string" ? body.text : typeof body.snippet === "string" ? body.snippet : "";
+    const snippet = parseSnippet(text);
+    if (!snippet.ok) {
+      throw Object.assign(new Error(snippet.error ?? "Nothing to run."), {
+        status: 422,
+        hint: snippet.warnings[0] ?? null,
+        body: { warnings: snippet.warnings },
+      });
+    }
+    const signal = AbortSignal.timeout(config.load().requestTimeoutMs);
+    const result = await runSnippet({
+      nim,
+      snippet,
+      model: typeof body.model === "string" ? body.model : undefined,
+      signal,
+    });
+    return { ...result, warnings: snippet.warnings, invocation: snippet.invocation };
   });
 
   route("POST", "/api/embeddings", async ({ body }) => {

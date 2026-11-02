@@ -158,6 +158,26 @@ Behaviour worth knowing:
 - `POST /api/settings/key/verify` re-tests the stored credential, and
   `PUT /api/settings` still accepts a plain key for scripts.
 
+### Replay the exact request you pasted
+
+**Chat lab → Replay a request** takes the same snippet and runs *that* request
+through the app: python `payload = {…}`, a `curl … -d '{…}'`, a node `const body =
+{…}`, or bare JSON. Vision parts, `top_p`, penalties and `reasoning_effort` are
+forwarded unchanged; the panel shows the parsed payload, any warnings (local file
+paths cannot be read — attach the image instead) and the cURL equivalent with the
+key removed. Use **Parse** to preview without calling NVIDIA, **Run it** to send.
+
+```bash
+curl -s localhost:8787/api/snippets/parse -H 'content-type: application/json' \
+  -d '{"text":"payload = {\"model\":\"mistralai/mistral-large-4-1t-a52b\",\"messages\":[…],\"reasoning_effort\":\"high\"}"}'
+curl -s localhost:8787/api/snippets/run   -H 'content-type: application/json' -d '{"text":"<snippet>"}'
+```
+
+The response echoes only the sanitised request (image bytes become `<image>`),
+plus content, reasoning, usage and whether it ran simulated or live. Network
+failures are reported as egress problems (`ECONNRESET` → "egress to NVIDIA is
+blocked"), never as a bad key.
+
 ### Configuration
 
 | Variable | Default | Purpose |
@@ -187,7 +207,7 @@ hint.
 | **Mission control** | Give a goal, set policy, see what the company is doing right now. |
 | **Company OS** | Build a company from a goal, then run its org chart, board, finances, approvals and auto mode — and mirror it into Paperclip. |
 | **Autopilot** | Live run timeline, plan, work items, reviews, artifacts, executive report, approvals. |
-| **Chat lab** | Streaming playground: model picker, temperature, JSON mode, agent tools, vision attachments. |
+| **Chat lab** | Streaming playground: model picker, temperature, JSON mode, agent tools, vision attachments, and replay of any pasted request snippet. |
 | **Knowledge & RAG** | Add company documents, index them, test embed → rerank retrieval with scores. |
 | **Models & routing** | Live catalog from `build.nvidia.com`, filter by capability, pin a model per agent role. |
 | **Guardrails** | Screen any text with NVIDIA safety models and see the raw verdict. |
@@ -206,6 +226,8 @@ curated default. Every role is pinnable in **Models & routing**.
 GET    /api/status                 config, roles, counts (never the key)
 POST   /api/settings/key           paste a key or snippet → parse, verify, configure
 POST   /api/settings/key/verify    re-test the stored credential
+POST   /api/snippets/parse         extract a chat payload from a pasted snippet
+POST   /api/snippets/run           replay that exact request through NIM
 GET    /api/models                 live catalog + capability labels + role routing
 POST   /api/chat                   chat completion
 POST   /api/chat/stream            SSE token stream
@@ -272,6 +294,7 @@ nvidia-autopilot/
 │  │                   org.mjs (goal → org design), service.mjs (cycles, auto mode)
 │  ├─ paperclip.mjs    Paperclip REST bridge (preview, mirror, typed errors)
 │  ├─ keyintake.mjs    find key/endpoints/models/params in any pasted text
+│  ├─ snippets.mjs     parse + replay a pasted chat-completions request
 │  ├─ store.mjs        file-backed runs, events, artifacts, knowledge
 │  ├─ config.mjs       settings precedence + 0600 secret storage
 │  └─ sim.mjs          deterministic offline NIM simulator
@@ -280,7 +303,8 @@ nvidia-autopilot/
 │  └─ views/           dashboard, autopilot, chat, knowledge, models,
 │                      guardrails, studio, companies, settings
 ├─ scripts/seed-demo.mjs
-└─ test/               46 tests: engine, tools, retrieval, company, bridge, credential intake, HTTP, UI
+└─ test/               53 tests: engine, tools, retrieval, company, bridge, credential intake,
+snippet replay, HTTP, UI
 ```
 
 Design choices worth knowing:
@@ -299,7 +323,7 @@ Design choices worth knowing:
 ## Tests
 
 ```bash
-npm test                                      # 46 tests, no network, no key
+npm test                                      # 53 tests, no network, no key
 npm i --no-save jsdom && npm test             # + UI render smoke test
 ```
 
@@ -309,8 +333,10 @@ reviews, guardrails, report, artifacts, event ordering), pause/resume/cancel,
 approval gating, budget hard-stops, company creation and cycles, auto mode limits,
 per-agent budgets, the Paperclip bridge (dry run, mirror, error hints), credential
 intake (snippet/bare-key/env-line parsing, verification that separates a bad key
-from an unreachable host, and never echoing the secret), every HTTP route, and
-that each view — including every Company OS tab — renders against the live API.
+from an unreachable host, and never echoing the secret), snippet replay (python,
+curl, node and JSON bodies; the exact wire payload including `reasoning_effort`
+and vision parts; blocked-egress hints), every HTTP route, and that each view —
+including every Company OS tab — renders against the live API.
 
 ---
 

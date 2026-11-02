@@ -100,6 +100,23 @@ export async function render(el, ctx) {
         </div>
 
         <div class="card">
+          <div class="card-head">
+            <span class="card-title">Replay a request</span>
+            <span class="tiny faint">python · curl · node · json</span>
+          </div>
+          <p class="tiny faint" style="margin-bottom:8px">
+            Paste the snippet you already run elsewhere (payload, headers — anything). The app extracts the
+            payload, runs the <em>same</em> request through its NIM client and shows what it sent.
+          </p>
+          <textarea id="snippet" rows="5" spellcheck="false" placeholder='payload = { "model": "mistralai/mistral-large-4-1t-a52b", "messages": [{"role": "user", "content": "hi"}], "reasoning_effort": "high" }'></textarea>
+          <div class="row-wrap" style="margin-top:8px">
+            <button class="btn btn-sm" id="snippet-parse">Parse</button>
+            <button class="btn btn-primary btn-sm" id="snippet-run">Run it</button>
+          </div>
+          <div id="snippet-out" style="margin-top:10px"></div>
+        </div>
+
+        <div class="card">
           <div class="card-head"><span class="card-title">System prompt</span></div>
           <textarea id="system" rows="4" placeholder="Optional. Sets the model's role and constraints."></textarea>
           <div class="chips" style="margin-top:8px">
@@ -228,6 +245,73 @@ export async function render(el, ctx) {
       void attachment;
     }
   }
+
+  const snippetOut = () => el.querySelector("#snippet-out");
+
+  function paintSnippet(result) {
+    const payload = result.payload;
+    const chips = payload
+      ? [
+          `model ${payload.model ?? "(default)"}`,
+          payload.stream ? "stream" : "non-stream",
+          ...Object.entries(payload.params ?? {}).map(([key, value]) => `${key} ${value}`),
+          ...payload.messages.map((message) =>
+            typeof message.content === "string" ? `${message.role} text` : `${message.role} ${message.content.length} part(s)`,
+          ),
+        ]
+      : [];
+    snippetOut().innerHTML = `
+      ${result.ok === false ? `<div class="banner red"><span>✕</span><div>${esc(result.error)}</div></div>` : ""}
+      ${chips.length ? `<div class="chips">${chips.map((chip) => `<span class="chip">${esc(chip)}</span>`).join("")}</div>` : ""}
+      ${(result.warnings ?? []).map((warning) => `<div class="tiny faint" style="margin-top:6px">· ${esc(warning)}</div>`).join("")}
+      ${result.curl ? `<pre style="margin-top:8px;max-height:170px"><code>${esc(result.curl)}</code></pre>` : ""}`;
+  }
+
+  el.querySelector("#snippet-parse").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const text = el.querySelector("#snippet").value.trim();
+    if (!text) return toast("Paste a snippet first.", "warn");
+    button.disabled = true;
+    try {
+      paintSnippet(await api.post("/api/snippets/parse", { text }));
+    } catch (error) {
+      reportError(error);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  el.querySelector("#snippet-run").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const text = el.querySelector("#snippet").value.trim();
+    if (!text) return toast("Paste a snippet first.", "warn");
+    button.disabled = true;
+    button.innerHTML = `<span class="spinner"></span> running`;
+    try {
+      const result = await api.post("/api/snippets/run", { text });
+      snippetOut().innerHTML = `
+        <div class="banner ${result.simulated ? "" : "green"}"><span>${result.simulated ? "◐" : "✓"}</span><div>
+          <strong>${esc(result.model)}</strong> · ${result.simulated ? "simulated" : "live"} · ${fmt.tokens(result.usage?.totalTokens ?? 0)} tokens
+        </div></div>
+        ${(result.warnings ?? []).map((warning) => `<div class="tiny faint" style="margin-top:6px">· ${esc(warning)}</div>`).join("")}`;
+      state.messages.push({
+        role: "user",
+        content: `**Replayed snippet** → ${result.model}
+
+\`\`\`json
+${JSON.stringify(result.request, null, 2).slice(0, 900)}
+\`\`\``,
+      });
+      state.messages.push({ role: "assistant", content: result.content, model: result.model, simulated: result.simulated });
+      paintLog();
+      toast("Snippet replayed");
+    } catch (error) {
+      snippetOut().innerHTML = `<div class="banner red"><span>✕</span><div><strong>${esc(error.message)}</strong>${error.hint ? ` ${esc(error.hint)}` : ""}</div></div>`;
+    } finally {
+      button.disabled = false;
+      button.textContent = "Run it";
+    }
+  });
 
   el.querySelector("#model").addEventListener("change", (event) => {
     state.model = event.target.value;
