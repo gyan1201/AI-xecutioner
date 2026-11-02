@@ -42,6 +42,23 @@ Paste that into **Settings → Quick Setup via Code Snippet** (or **Models → A
 | --- | --- |
 | ![Models](docs/screenshot-models.jpg) | ![Quick setup](docs/screenshot-quick-setup.jpg) |
 
+### Full auto: a name and a goal is the whole setup
+
+The first screen asks for two things — **what the company is called** and **what it is for** — and takes a model key if you have one. Press one button and Paperclip does the rest:
+
+1. **Configures every key you paste.** A raw key or a whole Python/cURL snippet, one per line; the provider is detected, verified when the network allows, and recorded. Skip it and the company still runs in simulation.
+2. **Picks the blueprint that fits the goal.** All 36 NVIDIA blueprints are ranked against the brief (curated domain intents + weighted lexical overlap), so “screen every online order for fraud” lands on Retail Loss Prevention rather than the nearest keyword coincidence. With a live key, the strategist model drafts the org instead and the draft is validated before it is used.
+3. **Hires the team.** Roles, titles and models come from the blueprint; template names are replaced with real ones, and every agent gets two NVIDIA skills that match the work.
+4. **Writes the backlog.** A metric-and-baseline issue, an issue per NIM endpoint family the company needs, the blueprint's build steps, and a review gate — each with acceptance criteria, so “done” is checkable.
+5. **Runs the first cycle.** The strategist plans, the team works, quality reviews, the ledger records every call, and the standup is written from the real results.
+6. **Hands you the company.** The report shows the steps, the first cycle's verdict and the spend, with one click into the dashboard. Optionally it is left in autonomous mode.
+
+`POST /api/launch` streams those steps over SSE (`?stream=1`), so the launcher is a live checklist rather than a spinner. Everything it creates is ordinary company state: edit the team, replan the backlog, run cycles by hand — nothing is hidden behind the generator.
+
+| | |
+| --- | --- |
+| ![Full auto](docs/screenshot-launch.jpg) | ![Launched](docs/screenshot-launch-report.jpg) |
+
 | | |
 | --- | --- |
 | ![Skills](docs/screenshot-skills.jpg) | ![Blueprints](docs/screenshot-blueprints.jpg) |
@@ -67,7 +84,7 @@ NVIDIA_API_KEY=nvapi-... npm start
 …or paste the key — or a whole snippet — into **Settings → Quick Setup via Code Snippet**. It is verified against `GET /v1/models` when the host can reach it, stored in `data/keys.json` with mode `0600`, and never sent back to the browser.
 
 ```bash
-npm test             # 54 tests: catalog, engine, providers, HTTP surface, shell invariants
+npm test             # 62 tests: catalog, engine, providers, HTTP surface, shell invariants
 npm run sync:skills  # re-snapshot github.com/NVIDIA/skills (optional)
 ```
 
@@ -118,6 +135,7 @@ Each blueprint ships a team (names, titles, roles, models, budgets), a goal with
 
 The Paperclip loop, intact, with NVIDIA as the only model provider:
 
+* **Full auto launch** — name + goal + optional keys → a blueprint-matched team, a written backlog, a configured provider and a first cycle, streamed step by step.
 * **Dashboard** — company health, spend (caps are optional), the board at a glance, cycle history, recent runs.
 * **Inbox** — everything waiting on a human in one list: approvals, blocked issues, failed runs. Approve or deny inline.
 * **Issues** — list and board views, priority/assignee/project filters, full issue pages with an editable brief, acceptance criteria, comments, artifacts and a run trace.
@@ -149,6 +167,7 @@ server/
     retrieval.mjs      chunk → embed → cosine → rerank → prompt context
     tools.mjs          agent tools (knowledge search, issue lookup, ledger, web)
     engine.mjs         plan / runIssue / chat / cycle / routines / approvals
+    launch.mjs         goal → blueprint match → team + backlog (full auto)
     service.mjs        view models the UI consumes
   nim/
     catalog.mjs        97-model catalog, capabilities, costs, live merge
@@ -160,7 +179,7 @@ server/
     intake.mjs         credential parsing (paste a key, env line or curl snippet)
 web/
   index.html  styles.css  lib.js (DOM/SSE/format helpers)  app.js (shell, router, palette)
-  views/      19 view modules, each `render(root, ctx)` → optional cleanup
+  views/      20 view modules, each `render(root, ctx)` → optional cleanup
 data/         companies/*.json, skills.json, settings.json, keys.json(0600)
 test/         catalog · engine · api
 ```
@@ -176,6 +195,7 @@ Every screen is a thin client over a JSON API. Highlights:
 ```
 GET    /api/health | /api/status | /api/bootstrap
 GET    /api/companies                     POST /api/companies
+POST   /api/launch[?stream=1]              POST /api/launch/plan   (dry run)
 GET    /api/companies/:id/dashboard|inbox|ledger|org|export
 POST   /api/companies/:id/cycle[?stream=1]      POST …/plan
 GET    /api/companies/:id/agents          POST/PATCH/DELETE

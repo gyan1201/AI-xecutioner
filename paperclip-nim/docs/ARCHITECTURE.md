@@ -12,8 +12,20 @@ HTTP request ──► routes.mjs ──► engine / service ──► store (JS
 * **`store.mjs`** owns durability: one JSON document per company, rewritten on save, plus event-bus publication. Writes are serialised through `store.withCompany`, so a run and a ledger append cannot interleave with a UI patch.
 * **`engine.mjs`** owns behaviour: `planOnly`, `planCycle`, `runIssue`, `chat`, `runRoutine`, `decideApproval`, the scheduler.
 * **`service.mjs`** owns read models: the shapes the UI renders. Views never stitch entity state together themselves.
+* **`domain/launch.mjs`** owns the full-auto planning step: it reads the goal, ranks the 36 blueprints (curated intents + weighted lexical overlap), rewrites the winner's team and backlog around the goal, and validates a model-authored draft when one is available. It is pure — no store, no network — so the same brief always produces the same company.
 * **`nim/client.mjs`** is the only place that speaks HTTP to NVIDIA, and the only place that knows about live vs simulated.
-* **`web/`** is a thin client: 19 view modules with `render(root, ctx)`, a hash router, one SSE firehose, and helpers in `lib.js`.
+* **`web/`** is a thin client: 20 view modules with `render(root, ctx)`, a hash router, one SSE firehose, and helpers in `lib.js`.
+
+## The launch loop
+
+`POST /api/launch` is the front door: name + goal + optional keys in, a working company out. It is deliberately the same machinery as everything else — it configures providers through `configureProviderInput` (shared with `/api/providers/apply`), creates the company through `createCompany({ plan })`, and runs the first cycle through `planCycle`. No private code path, which means anything it builds can be edited by hand afterwards.
+
+1. **Configure** — each pasted credential becomes a vault entry + provider row; verification is best effort and never blocks the launch.
+2. **Plan** — `planForGoal` ranks blueprints against the goal. Live mode may instead ask the strategist for a JSON org (`normalizeDraft` repairs or rejects it; the blueprint plan is always the fallback).
+3. **Create** — one agent per role (real names, two matched NVIDIA skills each), a goal whose title is the user's goal, and a backlog of six or so issues with acceptance criteria.
+4. **Run** — the first cycle is the normal cycle path; a failure is reported as a step, not as a failed launch.
+
+Progress is emitted as SSE `step` / `progress` frames with stable ids (`brief`, `provider`, `plan`, `company`, `auto`, `cycle`, `done`), so a client can replace a step in place instead of appending duplicates.
 
 ## The run loop
 
@@ -63,12 +75,13 @@ The UI surfaces the flag (`simulated` pill in Studio, "simulated" in run metadat
 ## Testing
 
 ```bash
-npm test                       # 32 tests
+npm test                       # 62 tests
 node --test test/engine.test.mjs
 ```
 
 * `test/catalog.test.mjs` — 97 models / 430 skills / 36 blueprints, capability coverage, defaults resolve, live merge, blueprint model references.
 * `test/engine.test.mjs` — seed, full run, review attempt, unlimited spend + budget gate, plan, cycle + standup, approvals, knowledge search, agent CRUD, embedding geometry.
+* `test/api.test.mjs` — every route group over HTTP, including full auto: blueprint match, staffed launch, SSE step stream, key configuration without echo, and a first cycle.
 * `test/api.test.mjs` — boots the real server on an ephemeral port and walks the HTTP surface, including SSE runs and cycles.
 
 Every test writes to `PAPERCLIP_DATA_DIR` in a temp directory, so `data/` is never touched and tests can run in parallel with the dev server.

@@ -86,6 +86,17 @@ Detection reads pasted snippets — Python, cURL, an env line, or a bare key —
 
 Connections live in `data/providers.json` (keys stay in `data/keys.json`). At call time the client resolves a model id to its provider and uses that base URL and key; everything else keeps using the NIM default, so adding a Groq key never repoints NVIDIA inference.
 
+## From a goal to a blueprint
+
+Full auto has to choose *which* of the 36 reference architectures a one-line goal describes. `blueprints.mjs` exposes `rankBlueprints(goal)`, which scores every blueprint on two signals:
+
+* **Curated intents** — a table mapping the words people actually type to a blueprint (`support`, `helpdesk`, `ticket`, `response time` → Customer Service Voice Agent; `fraud`, `chargeback`, `self-checkout` → Retail Loss Prevention). This is what stops "cut support response time" landing on the knowledge copilot because it happens to contain the word "copilot".
+* **Weighted lexical overlap** — name and category count more than prose, and a single token's contribution is capped, so a keyword repeated across a summary cannot outvote a domain match.
+
+The winner supplies the roles, the models per role, and the NIM endpoint families the company will call. `launch.mjs` then rewrites the demo copy around the user's goal, replaces template names ("Blueprint Lead") with real ones, assigns two matching NVIDIA skills per agent, and composes the backlog: a metric/baseline issue, one issue per endpoint family the blueprint needs, the build steps, and a review gate — each with acceptance criteria.
+
+In live mode the strategist model may draft the org instead (`draftMessages` → JSON → `normalizeDraft`). Anything malformed, over-sized, or referencing a model that is not in the catalog is repaired or discarded, and the deterministic blueprint plan is used. Simulation never invents a draft, so demos are reproducible.
+
 ## Simulation
 
 `sim.mjs` implements every family locally:

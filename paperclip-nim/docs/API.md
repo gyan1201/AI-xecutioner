@@ -2,7 +2,7 @@
 
 Base URL: `http://localhost:8790`. All responses are JSON unless noted. Errors look like `{ "error": "...", "code": "...", "hint": "..." }` with a 4xx/5xx status.
 
-Two endpoints stream: `…/cycle?stream=1`, `…/issues/:issueId/run?stream=1`, `…/agents/:agentId/chat` and `/api/events`. They emit `text/event-stream` frames named `delta`, `done`, `error`, `event`, `ping`.
+Four endpoints stream: `…/cycle?stream=1`, `…/issues/:issueId/run?stream=1`, `/api/launch?stream=1`, `…/agents/:agentId/chat` and `/api/events`. They emit `text/event-stream` frames named `delta`, `done`, `error`, `event`, `ping`.
 
 ## System
 
@@ -30,6 +30,27 @@ Two endpoints stream: `…/cycle?stream=1`, `…/issues/:issueId/run?stream=1`, 
 | GET | `/api/companies/:id/export` | portable bundle (re-importable) |
 | POST | `/api/companies/:id/auto` | `{ enabled? }` toggle the scheduler |
 | POST | `/api/companies/import` | import a bundle |
+
+## Full auto launch
+
+One call builds a company from a brief. Both endpoints accept keys inline, so the whole setup is a single request.
+
+| Method | Path | Body / notes |
+| --- | --- | --- |
+| POST | `/api/launch/plan` | Dry run. `{ name?, goal, blueprintId? }` → `{ plan: { source, blueprint, match, goal, agents[], issues[], counts }, providers, config }`. Nothing is written; the launcher calls this while you type. |
+| POST | `/api/launch` | `{ name, goal, keys?, key?, snippet?, providerId?, blueprintId?, runCycle?, autoMode?, maxIssues?, useModel?, verify? }`. `?stream=1` emits `step` / `progress` frames and a final `done`. Returns `{ company, launch: { steps[], credentials[], plan, cycle, autoMode }, providers, config }`. |
+
+* `keys` is an array of pasted keys or snippets; each is detected, configured and recorded separately. The raw key is never echoed back (`credentials[]` carries only the provider name, base URL, model, `verified` and a human-readable `detail`).
+* `name` and `goal` are required (`400 name_required` / `400 goal_required`). Everything else has a default: no keys ⇒ simulation, `runCycle` true, `autoMode` false.
+* `plan.source` says how the company was designed: `matched` (blueprint ranked against the goal), `selected` (a `blueprintId` was supplied), `default` (the goal matched nothing specific) or `model` (the strategist drafted it and the draft validated).
+* Steps are `{ id, label, detail, ok?, skipped?, state? }` with ids `brief`, `provider`, `plan`, `company`, `auto`, `cycle`, `done`; a step with `state: "running"` is replaced in place by its finished version.
+* Every failure after validation is a step with `ok: false` rather than a dead request — a key that cannot be verified is reported and the launch continues; a first cycle that fails is reported and the company is still created.
+
+```bash
+curl -sX POST localhost:8790/api/launch \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Northwind Support","goal":"Cut support response time with an AI triage copilot","keys":["nvapi-..."]}'
+```
 
 ## Cycles and planning
 

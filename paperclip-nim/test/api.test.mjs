@@ -287,6 +287,88 @@ test("approvals decide through the API", async () => {
   assert.equal(bad.status, 400);
 });
 
+test("full auto: a name and a goal become a staffed company", async () => {
+  const goal = "Cut customer support response time to under five minutes with an AI triage copilot";
+  const preview = await post("/api/launch/plan", { name: "Northwind Support", goal });
+  assert.equal(preview.status, 200);
+  const plan = preview.body.plan;
+  assert.ok(plan.blueprint.id, "a blueprint is chosen");
+  assert.match(plan.blueprint.name, /Customer Service/, "support goal lands on the support blueprint");
+  assert.equal(plan.source, "matched");
+  assert.ok(plan.counts.agents >= 3, "at least three agents");
+  assert.ok(plan.counts.issues >= 5, "a real backlog");
+  assert.ok(plan.issues.every((issue) => issue.acceptance.length >= 2), "every issue has a definition of done");
+
+  const launched = await post("/api/launch", { name: "Northwind Support", goal, runCycle: true });
+  assert.equal(launched.status, 200);
+  const company = launched.body.company;
+  assert.equal(company.name, "Northwind Support");
+  assert.match(company.goals[0].title, /Cut customer support/, "the goal is the company goal");
+  assert.ok(company.agents.length >= 3);
+  assert.ok(company.issues.length >= 5);
+  assert.ok(company.agents.every((agent) => (agent.skills ?? []).length >= 1), "agents get NVIDIA skills");
+  assert.ok(company.agents.every((agent) => agent.model), "every agent has a model");
+
+  const ids = launched.body.launch.steps.map((step) => step.id);
+  for (const id of ["brief", "provider", "plan", "company", "cycle", "done"]) assert.ok(ids.includes(id), `step ${id} reported`);
+  assert.equal(launched.body.launch.cycle.ok, true, "the first cycle runs");
+  assert.ok(launched.body.launch.cycle.ran >= 1);
+
+  const boot = await get("/api/bootstrap");
+  assert.equal(boot.body.activeCompanyId, company.id, "the new company becomes active");
+});
+
+test("full auto: a pasted key is configured, and the key never comes back", async () => {
+  const key = `nvapi-${"test".repeat(8)}`;
+  const launched = await post("/api/launch", {
+    name: "Keyed Co",
+    goal: "Answer customer questions with cited research",
+    keys: [`client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key="${key}")`],
+    verify: false,
+    runCycle: false,
+    autoMode: true,
+  });
+  assert.equal(launched.status, 200);
+  assert.equal(JSON.stringify(launched.body).includes(key), false, "the raw key is never echoed");
+  assert.equal(launched.body.launch.credentials.length, 1);
+  assert.equal(launched.body.launch.credentials[0].providerId, "nvidia");
+  assert.equal(launched.body.launch.cycle, null, "runCycle:false skips the first cycle");
+  assert.equal(launched.body.launch.autoMode, true);
+  assert.equal(launched.body.company.settings.autoMode, true);
+
+  const providers = await get("/api/providers");
+  assert.ok(providers.body.providers.some((entry) => entry.providerId === "nvidia" && entry.keyPresent));
+
+  // Leave the shared test vault as we found it: later tests assert no key.
+  const removed = await fetch(`${base}/api/providers/nvidia`, { method: "DELETE", signal: timeout() });
+  assert.equal(removed.status, 200);
+  const after = await get("/api/providers");
+  assert.equal(after.body.providers.some((entry) => entry.providerId === "nvidia" && entry.keyPresent), false);
+});
+
+test("full auto: the launch streams its steps over SSE", async () => {
+  const response = await fetch(`${base}/api/launch?stream=1`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    body: JSON.stringify({ name: "Streamed Co", goal: "Summarise CCTV footage for security incidents", runCycle: false }),
+    signal: timeout(120_000),
+  });
+  assert.equal(response.status, 200);
+  const text = await response.text();
+  assert.match(text, /event: step/);
+  assert.match(text, /event: done/);
+  assert.match(text, /"name":"Streamed Co"/);
+});
+
+test("full auto: missing name or goal is a usable 400", async () => {
+  const noName = await post("/api/launch", { goal: "Do something useful" });
+  assert.equal(noName.status, 400);
+  assert.equal(noName.body.code, "name_required");
+  const noGoal = await post("/api/launch", { name: "Nameless" });
+  assert.equal(noGoal.status, 400);
+  assert.equal(noGoal.body.code, "goal_required");
+});
+
 test("no spend limit by default, and a cap can still be added", async () => {
   const created = await post("/api/companies", { name: "Unlimited Co", mission: "Ship without a ceiling." });
   assert.equal(created.status, 200);

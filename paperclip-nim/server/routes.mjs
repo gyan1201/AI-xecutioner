@@ -11,6 +11,7 @@ import { extname, join, normalize, resolve } from "node:path";
 import { addVaultKey, ensureDirs, loadSettings, loadVault, paths, publicConfig, removeVaultKey, resolveCredential, saveSettings, setActiveVaultKey, vaultView } from "./config.mjs";
 import { CAPABILITIES, MODEL_CATALOG, catalogSummary, findModel, searchModels } from "./nim/catalog.mjs";
 import { BLUEPRINTS, blueprintStats, getBlueprint, listBlueprints } from "./nim/blueprints.mjs";
+import { draftMessages, normalizeDraft, planForGoal } from "./domain/launch.mjs";
 import { loadSkills, searchSkills, skillStats, suggestSkills } from "./nim/skills.mjs";
 import { imageContent } from "./nim/client.mjs";
 import { parseCredentialText } from "./nim/intake.mjs";
@@ -345,6 +346,229 @@ export function createApp(runtime) {
 
   add("POST", "/api/companies/import", async ({ body }) => ({ company: service.importCompany(body) }));
 
+  /* ---- full auto: name + goal + keys → a staffed company ---- */
+
+  const publicPlan = (plan) => ({
+    source: plan.source,
+    blueprint: plan.blueprint,
+    match: plan.match,
+    goal: plan.goal,
+    agents: plan.agents.map((agent) => ({
+      name: agent.name,
+      title: agent.title,
+      role: agent.role,
+      model: agent.model,
+      capabilities: agent.capabilities ?? [],
+    })),
+    issues: plan.issues.map((issue) => ({
+      title: issue.title,
+      priority: issue.priority,
+      labels: issue.labels ?? [],
+      acceptance: issue.acceptance ?? [],
+    })),
+    counts: { agents: plan.agents.length, issues: plan.issues.length },
+  });
+
+  /** One or more pasted credentials: whole snippets stay together, bare keys split per line. */
+  function credentialBlocks(values) {
+    const blocks = [];
+    const ignored = [];
+    for (const raw of values) {
+      const text = String(raw ?? "").trim();
+      if (!text) continue;
+      if (detectSetup(text).key) {
+        blocks.push(text);
+        continue;
+      }
+      const lines = text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const keyed = lines.filter((line) => detectSetup(line).key);
+      if (keyed.length) blocks.push(...keyed);
+      else ignored.push(text.slice(0, 120));
+    }
+    return { blocks: [...new Set(blocks)], ignored };
+  }
+
+  const credentialInputs = (body) => {
+    const values = [];
+    if (Array.isArray(body.keys)) values.push(...body.keys);
+    else values.push(body.keys);
+    values.push(body.key, body.snippet);
+    return values;
+  };
+
+  function parseJsonLoose(text) {
+    const cleaned = String(text ?? "").replace(/```(?:json)?/gi, "").trim();
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start === -1 || end <= start) return null;
+    try {
+      return JSON.parse(cleaned.slice(start, end + 1));
+    } catch {
+      return null;
+    }
+  }
+
+  add("POST", "/api/launch/plan", async ({ body }) => {
+    const name = String(body.name ?? "").trim() || "New company";
+    const goal = String(body.goal ?? "").trim();
+    const plan = planForGoal({ name, goal, blueprintId: body.blueprintId ? String(body.blueprintId) : null });
+    const vault = loadVault();
+    return {
+      plan: publicPlan(plan),
+      providers: providersView({ vault }),
+      connected: customModels({ vault }),
+      config: publicConfig(),
+      catalog: { count: MODEL_CATALOG.length, models: MODEL_CATALOG.length },
+    };
+  });
+
+  add("POST", "/api/launch", async ({ body, req, res }) => {
+    const streamed = String(new URL(req.url, "http://localhost").searchParams.get("stream") ?? "") === "1";
+    const sse = streamed ? openSse(res) : null;
+    const steps = [];
+    const emit = (step) => {
+      steps.push({ at: new Date().toISOString(), ...step });
+      if (!sse) return;
+      if (step.state === "running") sse.send("progress", step);
+      else sse.send("step", step);
+    };
+
+    try {
+      const name = String(body.name ?? "").trim();
+      const goal = String(body.goal ?? "").trim();
+      if (!name) {
+        const error = new Error("A company name is required.");
+        error.status = 400;
+        error.code = "name_required";
+        throw error;
+      }
+      if (!goal) {
+        const error = new Error("A company goal is required — it is what the first cycle plans against.");
+        error.status = 400;
+        error.code = "goal_required";
+        throw error;
+      }
+      emit({ id: "brief", ok: true, label: "Brief captured", detail: `${name} — ${goal.slice(0, 160)}` });
+
+      /* 1. keys (optional): every pasted provider is configured in place. */
+      const { blocks, ignored } = credentialBlocks(credentialInputs(body));
+      const credentials = [];
+      for (const block of blocks) {
+        try {
+          const applied = await configureProviderInput(
+            { text: block, providerId: body.providerId ?? undefined, verify: body.verify !== false },
+            { verify: body.verify !== false },
+          );
+          credentials.push({
+            providerId: applied.providerId,
+            name: applied.provider.name,
+            baseUrl: applied.provider.baseUrl,
+            model: applied.model,
+            verified: applied.verified,
+            detail: applied.detail,
+          });
+          emit({
+            id: "provider",
+            ok: true,
+            label: `${applied.provider.name} configured`,
+            detail: `${applied.verified ? "Verified" : "Saved"} · ${applied.detail}`,
+          });
+        } catch (error) {
+          emit({ id: "provider", ok: false, label: "That key was skipped", detail: error.message });
+        }
+      }
+      if (!blocks.length) {
+        emit({
+          id: "provider",
+          ok: true,
+          skipped: true,
+          label: "No key pasted — simulation mode",
+          detail: "Every agent still runs; add a key in Settings to switch the same company to live NIM.",
+        });
+      }
+      for (const entry of ignored) {
+        emit({ id: "provider", ok: false, skipped: true, label: "Input ignored", detail: `No API key in: ${entry}` });
+      }
+
+      /* 2. plan: blueprint match, upgraded by the strategist when live. */
+      let plan = planForGoal({ name, goal, blueprintId: body.blueprintId ? String(body.blueprintId) : null });
+      const live = nim.status().mode === "live";
+      emit({
+        id: "plan",
+        state: "running",
+        label: live && body.useModel !== false ? "Strategist is designing the org" : "Matching a blueprint to the goal",
+        detail: `${plan.match.reason === "matched" ? `Closest blueprint: ${plan.blueprint.name}` : `Starting from ${plan.blueprint.name}`}`,
+      });
+      if (live && body.useModel !== false) {
+        try {
+          const allowed = [...MODEL_CATALOG.map((model) => model.id), ...customModels({ vault: loadVault() }).map((model) => model.id)];
+          const strategistModel = plan.agents.find((agent) => agent.role === "strategist")?.model ?? plan.agents[0]?.model;
+          const reply = await Promise.race([
+            nim.chat({
+              model: strategistModel,
+              messages: draftMessages({ name, goal, blueprint: plan.blueprint }),
+              temperature: 0.4,
+              maxTokens: 1800,
+            }),
+            new Promise((resolve) => setTimeout(() => resolve(null), 60_000)),
+          ]);
+          const draft = reply ? normalizeDraft(parseJsonLoose(reply.text), plan, { models: allowed }) : null;
+          if (draft) plan = { ...plan, ...draft };
+          else emit({ id: "plan", state: "warn", ok: true, label: "Draft discarded", detail: "The strategist's draft did not validate; keeping the blueprint plan." });
+        } catch (error) {
+          emit({ id: "plan", state: "warn", ok: true, label: "Draft unavailable", detail: `${error.message} — keeping the blueprint plan.` });
+        }
+      }
+      emit({
+        id: "plan",
+        ok: true,
+        label: `Plan: ${plan.blueprint.name}`,
+        detail: `${plan.agents.length} agents · ${plan.issues.length} issues · ${plan.source === "model" ? "drafted by the strategist" : plan.source === "selected" ? "blueprint you picked" : "matched to the goal"}`,
+      });
+
+      /* 3. create the company, run the first cycle, hand back the dashboard. */
+      const launched = await service.launchCompany({
+        name,
+        mission: goal,
+        plan,
+        runCycle: body.runCycle !== false && body.cycle !== false,
+        autoMode: Boolean(body.autoMode),
+        maxIssues: Math.min(Math.max(Number(body.maxIssues) || 3, 1), 6),
+        onStep: emit,
+      });
+
+      const result = {
+        company: service.companyView(launched.company.id),
+        launch: {
+          steps,
+          credentials,
+          plan: publicPlan(plan),
+          cycle: launched.cycle,
+          autoMode: launched.autoMode,
+          measurements: { seconds: Math.round((Date.now() - new Date(steps[0]?.at ?? Date.now()).getTime()) / 100) / 10 },
+        },
+        providers: providersView({ vault: loadVault() }),
+        config: publicConfig(),
+      };
+      if (sse) {
+        sse.send("done", result);
+        sse.close();
+        return null;
+      }
+      return result;
+    } catch (error) {
+      if (sse) {
+        sse.send("error", { message: error.message, code: error.code ?? "launch_failed", hint: error.hint ?? null, steps });
+        sse.close();
+        return null;
+      }
+      throw error;
+    }
+  });
+
   /* ---- agents ---- */
 
   add("GET", "/api/companies/:companyId/agents", async ({ params }) => {
@@ -648,16 +872,19 @@ export function createApp(runtime) {
     };
   });
 
-  add("POST", "/api/providers/apply", async ({ body }) => {
+  /**
+   * Turn pasted text (a key, or a whole Python/cURL snippet) into a configured
+   * provider row + vault entry. Shared by /api/providers/apply and the
+   * full-auto launcher so both paths behave identically.
+   */
+  async function configureProviderInput(body = {}, { verify = true } = {}) {
     const text = String(body.text ?? body.snippet ?? "");
     const detection = detectSetup(text);
     const providerId = String(body.providerId ?? detection.providerId ?? "nvidia");
     const known = getProvider(providerId);
     const key = String(body.key ?? detection.key ?? "").trim();
     if (!key) {
-      const error = new Error(
-        detection.warnings[0] ?? "No API key found in that snippet.",
-      );
+      const error = new Error(detection.warnings[0] ?? "No API key found in that snippet.");
       error.status = 400;
       error.code = "missing_key";
       error.hint =
@@ -671,9 +898,10 @@ export function createApp(runtime) {
       throw error;
     }
 
-    const baseUrl = String(
-      body.baseUrl ?? (detection.providerId === providerId ? detection.baseUrl : "") ?? "",
-    ).replace(/\/+$/, "") || known?.baseUrl || detection.baseUrl;
+    const baseUrl =
+      String(body.baseUrl ?? (detection.providerId === providerId ? detection.baseUrl : "") ?? "").replace(/\/+$/, "") ||
+      known?.baseUrl ||
+      detection.baseUrl;
     if (!baseUrl) {
       const error = new Error("That snippet has a key but no base URL, and the provider is unknown.");
       error.status = 400;
@@ -689,16 +917,20 @@ export function createApp(runtime) {
     let verified = false;
     let modelCount = null;
     let detail = "";
-    try {
-      const probe = await nimVerify(key, baseUrl);
-      verified = true;
-      modelCount = probe.count;
-      detail = `Verified: ${probe.count} models visible at ${new URL(baseUrl).host}.`;
-    } catch (error) {
-      detail =
-        providerId === "nvidia"
-          ? `Saved, but not verified (${error.message}) — staying in simulation until the key can reach ${new URL(baseUrl).host}. Untick “Force simulation” in Settings to go live anyway.`
-          : `Saved without verification — ${error.message}`;
+    if (verify) {
+      try {
+        const probe = await nimVerify(key, baseUrl);
+        verified = true;
+        modelCount = probe.count;
+        detail = `Verified: ${probe.count} models visible at ${new URL(baseUrl).host}.`;
+      } catch (error) {
+        detail =
+          providerId === "nvidia"
+            ? `Saved, but not verified (${error.message}) — staying in simulation until the key can reach ${new URL(baseUrl).host}. Untick “Force simulation” in Settings to go live anyway.`
+            : `Saved without verification — ${error.message}`;
+      }
+    } else {
+      detail = `Saved without a probe — ${name} is configured locally.`;
     }
 
     const keyId = addVaultKey({
@@ -714,7 +946,8 @@ export function createApp(runtime) {
       saveSettings({ baseUrl });
       // An unverified NVIDIA key would flip the whole product into live mode and
       // fail every call (no egress, or a typo). Keep simulation until it proves
-      // itself, or until the operator turns the override off in Settings.
+      // itself, or until the operator turns the override off in Settings. A
+      // skipped probe counts as unverified (launch can pass verify:false).
       if (!verified) saveSettings({ simulationOverride: true });
     }
 
@@ -736,6 +969,7 @@ export function createApp(runtime) {
     return {
       ok: true,
       provider: providersView({ vault: loadVault() }).find((entry) => entry.providerId === provider.providerId) ?? provider,
+      providerId: provider.providerId,
       model,
       models,
       verified,
@@ -743,6 +977,13 @@ export function createApp(runtime) {
       detail,
       detection: safeDetection,
       message: `Success! Auto-configured ${name} provider${model ? ` with model ${model}` : ""}.`,
+    };
+  }
+
+  add("POST", "/api/providers/apply", async ({ body }) => {
+    const applied = await configureProviderInput(body);
+    return {
+      ...applied,
       keys: vaultView(),
       providers: providersView({ vault: loadVault() }),
       config: publicConfig(),

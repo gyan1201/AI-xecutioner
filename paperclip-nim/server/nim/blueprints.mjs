@@ -474,6 +474,131 @@ export function getBlueprint(id) {
   return BLUEPRINTS.find((blueprint) => blueprint.id === id) ?? null;
 }
 
+/**
+ * Reading a plain-English company goal.
+ *
+ * "Full auto" has to answer one question the user never answers explicitly:
+ * *which of the 36 blueprints is this company?* This ranks them by lexical
+ * overlap with the goal, weighting the blueprint's name and category highest so
+ * "build a support triage copilot" lands on Customer Support rather than a
+ * random research blueprint. Pure + deterministic: no model call, same goal
+ * always yields the same company.
+ */
+const GOAL_STOPWORDS = new Set(
+  `a an and any are as at be build building built by can company companies create do does for from get give goal has have help how i in into is it its me my need needs of on or our out over that the their them then there these this to under up us use used using want we what when where which who why will with without you your business make making new one team idea please should would could`.split(
+    /\s+/,
+  ),
+);
+
+export function goalTokens(text) {
+  return String(text ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9+#.\s-]/g, " ")
+    .split(/[\s-]+/)
+    .filter((token) => token.length > 2 && !GOAL_STOPWORDS.has(token));
+}
+
+/**
+ * What a goal is *about*, in the vocabulary people actually type.
+ *
+ * Lexical overlap alone puts "cut customer support response time" on the
+ * knowledge-copilot blueprint because it contains the word "copilot". These
+ * hand-curated intents carry the domain signal that word-matching misses, so a
+ * full-auto launch lands on a team that fits the brief.
+ */
+const INTENTS = [
+  { blueprint: "contact-center", match: ["support", "helpdesk", "help desk", "ticket", "tickets", "call center", "call centre", "contact center", "customer service", "customer", "deflection", "response time", "voice agent", "csat"] },
+  { blueprint: "research-copilot", match: ["knowledge", "copilot", "internal docs", "wiki", "confluence", "citations", "cited", "source of truth", "ask questions", "expert"] },
+  { blueprint: "rag-pipeline", match: ["rag", "retrieval", "embedding", "vector", "chunking", "rerank", "semantic search", "search over", "index our"] },
+  { blueprint: "aiq-research", match: ["research", "deep research", "literature", "competitive", "market research", "sources", "brief", "report"] },
+  { blueprint: "content-factory", match: ["content", "marketing", "copy", "blog", "seo", "social", "campaign", "newsletter", "brand", "product description", "ads"] },
+  { blueprint: "loss-prevention", match: ["fraud", "fraud detection", "shrink", "shrinkage", "theft", "loss prevention", "return fraud", "chargeback", "self-checkout"] },
+  { blueprint: "shopping-assistant", match: ["shopping", "ecommerce", "e-commerce", "online store", "product catalog", "product recommendations", "add to cart", "shopper"] },
+  { blueprint: "personalization", match: ["recommendation", "recommender", "personalization", "personalisation", "recsys", "segment", "churn", "ltv", "sales", "leads", "lead scoring", "crm", "outreach", "upsell", "cross-sell", "revenue"] },
+  { blueprint: "deep-agents-code", match: ["code", "coding", "software", "engineering", "developer", "refactor", "pull request", "repo", "typescript", "python", "migration", "bugs"] },
+  { blueprint: "cyber-vuln", match: ["security", "vulnerability", "vulnerabilities", "cve", "pentest", "sast", "audit", "threat"] },
+  { blueprint: "guardrails", match: ["guardrail", "guardrails", "safety", "moderation", "compliance", "policy", "jailbreak", "red team"] },
+  { blueprint: "agent-eval", match: ["evaluation", "evals", "quality", "benchmark", "trace", "accuracy", "regression tests"] },
+  { blueprint: "sre-rca", match: ["sre", "incident", "on-call", "outage", "root cause", "observability", "devops", "uptime", "reliability"] },
+  { blueprint: "cudf-etl", match: ["etl", "data pipeline", "pipeline", "analytics", "warehouse", "parquet", "spark", "pandas"] },
+  { blueprint: "gqe-sql", match: ["sql", "database", "query", "bi", "reporting", "dashboards", "lakehouse"] },
+  { blueprint: "document-intelligence", match: ["document", "documents", "invoice", "contract", "pdf", "ocr", "parse", "extraction", "claims", "forms"] },
+  { blueprint: "docs-fab", match: ["documentation", "docs", "api docs", "readme", "tech writing", "release notes"] },
+  { blueprint: "ambient-clinical", match: ["clinical", "clinician", "patient", "soap note", "scribe", "medical record", "ehr"] },
+  { blueprint: "medical-imaging", match: ["imaging", "radiology", "x-ray", "mri", "ct scan", "pathology", "diagnosis"] },
+  { blueprint: "drug-discovery", match: ["drug", "molecule", "molecular", "pharma", "compound", "protein ligand", "chemistry", "candidate"] },
+  { blueprint: "genomics", match: ["genome", "genomic", "dna", "rna", "sequencing", "variant", "bioinformatics"] },
+  { blueprint: "protein-structure", match: ["protein", "structure prediction", "folding", "alphafold", "antibody"] },
+  { blueprint: "cuopt-routing", match: ["route", "routing", "logistics", "delivery", "fleet", "dispatch", "drivers", "supply chain", "scheduling"] },
+  { blueprint: "smart-warehouse", match: ["warehouse", "inventory", "robotics", "pick", "pack", "fulfillment", "forklift", "stock"] },
+  { blueprint: "manufacturing-vision", match: ["manufactur", "factory", "defect", "inspection", "assembly", "quality control", "production line"] },
+  { blueprint: "telecom-ran", match: ["telecom", "ran", "5g", "network slicing", "cell tower", "spectrum"] },
+  { blueprint: "automotive-perception", match: ["automotive", "vehicle", "autonomous", "adas", "lidar", "driving", "perception"] },
+  { blueprint: "climate-forecast", match: ["climate", "weather", "forecast", "storm", "flood", "renewable", "energy", "grid"] },
+  { blueprint: "pose-analytics", match: ["pose", "motion", "fitness", "ergonomics", "sports", "safety monitoring", "gesture"] },
+  { blueprint: "vss-video-search", match: ["video", "surveillance", "camera", "footage", "cctv", "summarization of video"] },
+  { blueprint: "digital-human", match: ["avatar", "digital human", "virtual assistant", "talking head", "tokkio", "virtual agent"] },
+  { blueprint: "realtime-translation", match: ["translation", "translate", "multilingual", "meeting notes", "transcription", "subtitles", "language"] },
+  { blueprint: "synthetic-data", match: ["synthetic", "data generation", "training data", "augmentation", "privacy", "redaction"] },
+  { blueprint: "always-on-fleet", match: ["fleet", "monitoring", "agents at scale", "24/7", "always on", "iot", "telemetry"] },
+  { blueprint: "agentic-rag", match: ["agentic", "multi-agent", "orchestration", "tool calls", "planner"] },
+];
+
+function intentHits(goal, blueprintId) {
+  const text = ` ${String(goal ?? "").toLowerCase().replace(/[^a-z0-9&+.\s-]/g, " ").replace(/\s+/g, " ")} `;
+  const hits = [];
+  for (const intent of INTENTS) {
+    if (intent.blueprint !== blueprintId) continue;
+    for (const phrase of intent.match) {
+      const needle = ` ${phrase.toLowerCase()} `;
+      if (text.includes(needle) || (phrase.length > 5 && text.includes(phrase.toLowerCase()))) hits.push(phrase);
+    }
+  }
+  return [...new Set(hits)];
+}
+
+/** When a goal says nothing a blueprint recognises, start from the generalist ops team. */
+export const DEFAULT_BLUEPRINT_ID = "always-on-fleet";
+
+export function rankBlueprints(goal, { limit = 6 } = {}) {
+  const wanted = new Set(goalTokens(goal));
+  const scored = BLUEPRINTS.map((blueprint) => {
+    const fields = [
+      [3, blueprint.name],
+      [2.5, blueprint.category],
+      [2.5, (blueprint.functions ?? []).join(" ")],
+      [2, blueprint.summary],
+      [1.2, blueprint.goal?.title ?? ""],
+      [1, (blueprint.backlog ?? []).map((item) => item.title).join(" ")],
+      [1, (blueprint.steps ?? []).join(" ")],
+    ];
+    const perToken = new Map();
+    for (const [weight, text] of fields) {
+      for (const token of new Set(goalTokens(text))) {
+        if (!wanted.has(token)) continue;
+        // Cap one token's contribution so a keyword repeated in prose cannot
+        // outvote a domain match on the name.
+        perToken.set(token, Math.min((perToken.get(token) ?? 0) + weight, 4.5));
+      }
+    }
+    let lexical = 0;
+    for (const value of perToken.values()) lexical += value;
+    const hits = intentHits(goal, blueprint.id);
+    const intentScore = Math.min(hits.length * 7, 14);
+    const matched = [...new Set([...perToken.keys(), ...hits])].slice(0, 6);
+    return {
+      id: blueprint.id,
+      name: blueprint.name,
+      category: blueprint.category,
+      summary: blueprint.summary,
+      functions: blueprint.functions ?? [],
+      score: Math.round((lexical + intentScore) * 10) / 10,
+      matched,
+    };
+  });
+  return scored.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)).slice(0, limit);
+}
+
 export function blueprintCategories() {
   return [...new Set(BLUEPRINTS.map((blueprint) => blueprint.category))].sort();
 }

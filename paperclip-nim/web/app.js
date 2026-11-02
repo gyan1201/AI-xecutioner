@@ -8,6 +8,7 @@ import {
 } from "./lib.js";
 
 import * as dashboard from "./views/dashboard.js";
+import * as launch from "./views/launch.js";
 import * as inbox from "./views/inbox.js";
 import * as issues from "./views/issues.js";
 import * as issue from "./views/issue.js";
@@ -28,6 +29,7 @@ import * as studio from "./views/studio.js";
 import * as settings from "./views/settings.js";
 
 const ROUTES = [
+  { key: "launch", label: "New company", icon: "plus", section: "Start", view: launch },
   { key: "dashboard", label: "Dashboard", icon: "dashboard", section: "Work", view: dashboard },
   { key: "inbox", label: "Inbox", icon: "inbox", section: "Work", view: inbox },
   { key: "issues", label: "Issues", icon: "issues", section: "Work", view: issues },
@@ -393,7 +395,7 @@ function companyMenu() {
       )
       .join("")}
     <div class="menu-sep"></div>
-    <div class="menu-item" data-action="new-company">${icon("plus", "")} New company</div>
+    <div class="menu-item" data-action="new-company">${icon("plus", "")} New company — full auto</div>
     <div class="menu-item" data-action="settings">${icon("settings", "")} Company settings</div>`;
   host.append(menu);
   menu.addEventListener("click", async (event) => {
@@ -407,7 +409,7 @@ function companyMenu() {
       await boot({ keepRoute: true });
       toast("Switched company");
     }
-    if (action === "new-company") newCompanyModal();
+    if (action === "new-company") navigate("/launch");
     if (action === "settings") navigate("/settings");
   });
   setTimeout(() => {
@@ -429,7 +431,7 @@ export function newCompanyModal() {
     body: `
       <div class="field"><label for="name">Name</label><input class="input" id="name" name="name" required placeholder="e.g. Northwind Labs" maxlength="80" /></div>
       <div class="field"><label for="mission">Mission</label><textarea class="textarea" id="mission" name="mission" placeholder="What is this company here to do? One sentence an agent can act on."></textarea></div>
-      <div class="field"><label for="budgetMonthlyCents">Monthly budget (cents)</label><input class="input" id="budgetMonthlyCents" name="budgetMonthlyCents" type="number" min="100" step="100" value="2400" /><div class="hint">$24.00. Agents get their own caps inside this.</div></div>
+      <div class="field"><label for="budgetMonthlyCents">Monthly budget (cents)</label><input class="input" id="budgetMonthlyCents" name="budgetMonthlyCents" type="number" min="0" step="100" value="0" /><div class="hint">0 = no limit (the default). Set a positive number only if you want spend to gate runs.</div></div>
       <div class="field"><label>Start from a blueprint (optional)</label><select class="select" name="blueprintId"><option value="">Blank slate — starter team of three</option>${(state.blueprintList ?? [])
         .map((blueprint) => `<option value="${esc(blueprint.id)}">${esc(blueprint.name)} — ${esc(blueprint.category)}</option>`)
         .join("")}</select></div>
@@ -495,7 +497,7 @@ function buildPalette(term) {
   }
   items.push({ kind: "action", label: "Run a cycle now", icon: "play", action: () => openCycleRunner() });
   items.push({ kind: "action", label: "New issue", icon: "plus", action: () => openNewIssue() });
-  items.push({ kind: "action", label: "New company", icon: "plus", action: () => newCompanyModal() });
+  items.push({ kind: "action", label: "New company (full auto)", icon: "plus", action: () => navigate("/launch") });
   const needle = term.trim().toLowerCase();
   paletteItems = items.filter((item) => !needle || item.label.toLowerCase().includes(needle)).slice(0, 40);
   const results = $("#palette-results");
@@ -520,9 +522,13 @@ async function boot({ keepRoute = false } = {}) {
     state.companyId = state.bootstrap.activeCompanyId ?? state.bootstrap.companies[0]?.id ?? null;
     state.company = null;
     if (!state.companyId) {
-      viewEl.innerHTML = `<div class="empty"><h3>No company yet</h3><p>Create one to staff a board of NIM agents.</p><button class="btn primary" id="create-first">Create a company</button></div>`;
-      $("#create-first")?.addEventListener("click", newCompanyModal);
-      return;
+      // Nothing to show but the front door: name + goal + keys builds the first
+      // company, so the empty state *is* the launcher.
+      window.__pcBooted = true;
+      if (resolveView(parseRoute()).meta.key !== "launch") {
+        location.hash = "/launch";
+        return;
+      }
     }
     if (!keepRoute && !location.hash) location.hash = "/dashboard";
     await render();
@@ -541,6 +547,7 @@ async function boot({ keepRoute = false } = {}) {
 window.addEventListener("hashchange", render);
 $("#company-switch").addEventListener("click", companyMenu);
 $("#new-issue").addEventListener("click", openNewIssue);
+$("#new-company-btn")?.addEventListener("click", () => navigate("/launch"));
 /* ---------------------------------------------------------------- theme */
 
 const THEME_KEY = "paperclip-theme";
@@ -618,8 +625,12 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     openNewIssue();
   }
+  if (event.key.toLowerCase() === "n") {
+    event.preventDefault();
+    navigate("/launch");
+  }
   if (event.key === "?") {
-    toast("⌘K search · C new issue · Esc close", "warn");
+    toast("⌘K search · C new issue · N new company · Esc close", "warn");
   }
 });
 

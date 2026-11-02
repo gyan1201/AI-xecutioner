@@ -675,3 +675,34 @@ kbd {
   .model-row { grid-template-columns: minmax(0, 1fr) 90px; }
   .model-row > :nth-child(n+3) { display: none; }
 }
+
+/* ---------------------------------------------------------------- full auto */
+
+.sidebar .new-issue.launch { color: var(--accent-bright); border-color: var(--accent-border); background: var(--accent-dim); }
+.sidebar .new-issue.launch:hover { background: var(--accent-dim); border-color: var(--accent); color: var(--accent-bright); }
+.sidebar .new-issue.launch svg { color: var(--accent-bright); }
+
+#launch-preview { scroll-margin-top: 64px; }
+.launch-grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.check-row { display: flex; gap: 8px; align-items: flex-start; font-size: 12.3px; color: var(--text-2); padding: 5px 0; cursor: pointer; }
+.check-row input { margin: 2px 0 0; accent-color: var(--accent); }
+
+.launch-steps { display: flex; flex-direction: column; gap: 1px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.step { display: flex; gap: 9px; align-items: flex-start; padding: 5px 0; }
+.step-icon { width: 15px; flex: 0 0 15px; display: grid; place-items: center; margin-top: 1px; }
+.step-glyph { width: 13px; height: 13px; }
+.step-glyph.ok { color: var(--accent-bright); }
+.step-glyph.dim { color: var(--dim); }
+.step.fail .step-glyph { color: var(--red-text); }
+.step-label { font-size: 12.2px; color: var(--text-2); }
+.step.running .step-label { color: var(--text); }
+.step-detail { font-size: 11.2px; color: var(--dim); margin-top: 1px; line-height: 1.45; }
+.step-spinner {
+  width: 11px; height: 11px; border-radius: 50%; display: block;
+  border: 1.6px solid var(--border-strong); border-top-color: var(--accent);
+  animation: spin .7s linear infinite;
+}
+
+@media (max-width: 1100px) {
+  .launch-grid { grid-template-columns: minmax(0, 1fr); }
+}

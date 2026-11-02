@@ -164,7 +164,7 @@ export function createService({ store, nim, engine, bus }) {
     return view;
   }
 
-  async function createCompany({ name, mission = "", blueprintId = null, budgetMonthlyCents = 0 }) {
+  async function createCompany({ name, mission = "", blueprintId = null, budgetMonthlyCents = 0, plan = null }) {
     const cleanName = requireString(name, "Company name", { max: 80 });
     const id = `co_${slugify(cleanName).replace(/-/g, "_")}_${Math.random().toString(36).slice(2, 5)}`;
     const issuePrefix = cleanName
@@ -218,6 +218,41 @@ export function createService({ store, nim, engine, bus }) {
       threads: {},
       stats: {},
     };
+
+    // A full-auto launch supplies a complete plan (goal + team + backlog) built
+    // from the company brief, so the company is staffed exactly once.
+    if (plan?.agents?.length) {
+      company.mission = company.mission || plan.goal?.description || "";
+      const created = deployPlan(company, plan, { actorId: "human" });
+      company.knowledge = [
+        createKnowledge({
+          title: "Company brief",
+          body: `${cleanName}. Goal: ${company.mission || plan.goal?.title || "to be defined"}.\n\nBlueprint: ${plan.blueprint?.name ?? "custom"} (${plan.blueprint?.category ?? "custom"}). This brief was drafted at launch — edit it so agents ground their answers in your real context.`,
+          tags: ["company", "brief"],
+        }),
+      ];
+      company.routines = [
+        createRoutine({
+          name: "Morning standup",
+          instruction:
+            "Summarise what shipped, what is blocked and what it cost. Name the single most valuable next action toward the goal.",
+          agentId: company.agents.find((agent) => agent.role === "strategist")?.id ?? company.agents[0]?.id ?? null,
+          cadenceMinutes: 1440,
+        }),
+      ];
+      store.createCompany(company);
+      store.setActive(company.id);
+      pushActivity(company, {
+        kind: "company.launched",
+        actorId: "human",
+        subject: cleanName,
+        detail: `Full auto · ${created.agents} agents · ${created.issues} issues · ${plan.blueprint?.name ?? "custom blueprint"}`,
+      });
+      recomputeCompany(company);
+      store.saveCompany(company);
+      if (company.settings.autoMode) engine.startAuto(company.id);
+      return { company, deployed: created };
+    }
 
     if (blueprintId) {
       const plan = planBlueprint(blueprintId, { issuePrefix });
@@ -345,6 +380,69 @@ export function createService({ store, nim, engine, bus }) {
     store.createCompany(company);
     store.setActive(company.id);
     return { company, deployed: null };
+  }
+
+  /**
+   * Full auto: create the company from a plan, optionally run its first cycle,
+   * and (optionally) leave it in autonomous mode. Steps are reported as they
+   * happen so the launcher can show a live checklist.
+   */
+  async function launchCompany({ name, mission, plan, runCycle = true, autoMode = false, maxIssues = 3, onStep = () => {} } = {}) {
+    const step = (entry) => {
+      try {
+        onStep(entry);
+      } catch {
+        /* a broken listener must never break a launch */
+      }
+    };
+
+    const startedAt = Date.now();
+    const created = await createCompany({ name, mission, plan });
+    const company = created.company;
+    step({
+      id: "company",
+      ok: true,
+      label: `${company.name} is staffed`,
+      detail: `${created.deployed?.agents ?? company.agents.length} agents · ${created.deployed?.issues ?? 0} issues · prefix ${company.issuePrefix}`,
+    });
+
+    if (autoMode) {
+      company.settings.autoMode = true;
+      store.saveCompany(company);
+      engine.startAuto(company.id);
+      step({ id: "auto", ok: true, label: "Autonomous mode on", detail: `A cycle every ${company.settings.cycleMinutes} minutes.` });
+    }
+
+    let cycle = null;
+    if (runCycle) {
+      step({ id: "cycle", state: "running", label: "Running the first cycle", detail: "The strategist plans, the team works, quality reviews." });
+      try {
+        const result = await engine.planCycle({ companyId: company.id, maxIssues });
+        cycle = {
+          ok: true,
+          focus: result.plan?.focus ?? "",
+          standup: result.standup ?? "",
+          ran: result.results?.length ?? 0,
+          accepted: (result.results ?? []).filter((row) => row.verdict === "accepted").length,
+          changesRequested: (result.results ?? []).filter((row) => row.verdict === "changes_requested").length,
+          blocked: (result.results ?? []).filter((row) => row.blocked).length,
+          costCents: result.cycle?.costCents ?? 0,
+          cycleId: result.cycle?.id ?? null,
+        };
+        step({
+          id: "cycle",
+          ok: true,
+          label: "First cycle finished",
+          detail: `${cycle.ran} ran · ${cycle.accepted} accepted · ${cycle.changesRequested} changes requested · ${cycle.blocked} blocked`,
+        });
+      } catch (error) {
+        cycle = { ok: false, reason: error.message, code: error.code ?? "cycle_failed" };
+        step({ id: "cycle", ok: false, label: "First cycle skipped", detail: error.message });
+      }
+    }
+
+    step({ id: "done", ok: true, label: "Company is live", detail: `${Math.round((Date.now() - startedAt) / 100) / 10}s end to end.` });
+    return { company: store.getCompany(company.id), deployed: created.deployed, cycle, autoMode: Boolean(autoMode) };
   }
 
   function deployPlan(company, plan, { actorId = "human" } = {}) {
@@ -1030,6 +1128,7 @@ export function createService({ store, nim, engine, bus }) {
     bootstrap,
     companyView,
     createCompany,
+    launchCompany,
     updateCompany,
     deployBlueprint,
     addAgent,
