@@ -1,0 +1,181 @@
+<!-- ============================================================
+     HERO
+     ============================================================ -->
+<div align="center">
+
+<img alt="NVIDIA Cosmos" src="assets/brand/cosmos-logo.png" width="274">
+
+# NVIDIA Cosmos
+
+### World Foundation Models for Physical AI
+
+**One model family that sees, reasons, simulates, and acts.**
+
+[![Models](https://img.shields.io/badge/-Cosmos%203%20models-ffd21e?logo=huggingface&logoColor=white&labelColor=555)](https://huggingface.co/collections/nvidia/cosmos3)
+[![Paper](https://img.shields.io/badge/-Technical%20Report-76b900?logo=arxiv&logoColor=white&labelColor=555)](https://research.nvidia.com/labs/cosmos-lab/cosmos3/technical-report.pdf)
+[![Website](assets/brand/badge-website.svg)](https://research.nvidia.com/labs/cosmos-lab/cosmos3/)
+
+[**Try it in your browser**](https://build.nvidia.com/nvidia/cosmos3-nano-reasoner) · [**Quickstart**](#generate-your-first-video) · [**Find your path**](#find-your-path) · [**Model Family**](#models) · [**Cookbook**](COOKBOOK.md)
+
+</div>
+
+<!-- ============================================================
+     DEMO GRID — the model sells itself.
+     Asset sources and re-cut specs: assets/ASSET_SPECS.md in NVIDIA/cosmos.
+     ============================================================ -->
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img src="assets/demos/physics_newton_cradle.gif" alt="Physics-aware generation: Newton's cradle">
+      <sub><a href="https://nvda.ws/48tob2l"><b>Physics-aware generation</b></a><br>A Newton's cradle in motion: momentum transfer rendered with physical fidelity</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/demos/transfer_worldscenario.gif" alt="World-scenario transfer: control layout to photoreal driving video">
+      <sub><a href="https://nvda.ws/4sm3te7"><b>Transfer</b></a><br>World-scenario control layout → photoreal driving video</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/demos/policy_screwdriver.gif" alt="Robot policy executing a manipulation task">
+      <sub><a href="https://nvda.ws/4ses7Nz"><b>Action policy</b></a><br>Policy run: "put the screwdriver and the glove in the purple container"</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="33%">
+      <img src="assets/demos/driving_sim_falling_rocks.gif" alt="Driving simulation for autonomous vehicles">
+      <sub><a href="https://nvda.ws/48tob2l"><b>Simulation</b></a><br>Generate synthetic data and create simulation for autonomous driving</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/demos/fd_egocentric_repair_poses.gif" alt="Forward dynamics egocentric rollout">
+      <sub><a href="https://nvda.ws/4srp0C7"><b>Action-conditioned World Model</b></a><br>Forward dynamics: egocentric rollout from input camera + hand pose</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/demos/reasoner_driving_hazard.gif" alt="World Reasoner: dashcam hazard anticipation">
+      <sub><a href="https://nvda.ws/4BlGqEj"><b>World reasoning</b></a><br>Reason in complex real-world scenarios: a rolling ball means a child or pet may follow</sub>
+    </td>
+  </tr>
+</table>
+
+---
+
+## What's new
+
+- **[Oct 2026]**&nbsp;<a href="#whats-new"><img src="assets/brand/badge-new.svg" alt="New" align="absmiddle"></a> [Interactive World Simulation with Cosmos for Physical AI](https://github.com/NVIDIA/cosmos/blob/main/COOKBOOK.md#simulation) - example model checkpoints and training recipes: [HF collection](https://huggingface.co/collections/nvidia/cosmos3-examples) · [Cookbook](COOKBOOK.md#simulation) · [Technical report](https://research.nvidia.com/labs/cosmos-lab/cosmos-simulation/technical-report.pdf) · [Website](https://research.nvidia.com/labs/cosmos-lab/cosmos-simulation/).
+- **[Jul 2026]** [Cosmos3-Edge](https://huggingface.co/nvidia/Cosmos3-Edge) released - the 4B tier for on-device, real-time deployment (Jetson AGX Orin / Thor / RTX Pro 6000).
+- **[May 2026]** Cosmos 3 released: [HF collection](https://huggingface.co/collections/nvidia/cosmos3) · [Technical Report](https://research.nvidia.com/labs/cosmos-lab/cosmos3/technical-report.pdf).
+
+## What is Cosmos?
+
+NVIDIA Cosmos is an open platform for building physical AI applications, supporting industry verticals such as robotics, autonomous vehicles, smart infrastructure, manufacturing, healthcare, agriculture. The mission of Cosmos is to provide better data, better environment, better starting point, and better tooling for physical AI developers.
+
+**Cosmos 3**, the current model family, is a suite of omnimodal world models built on a unified Mixture-of-Transformers architecture ([technical report](https://research.nvidia.com/labs/cosmos-lab/cosmos3/technical-report.pdf)).
+
+One model, two towers:
+
+|  | Inputs | Outputs | Use it for |
+|---|---|---|---|
+| **Reasoner** | text, vision | text | world understanding, grounding, task planning, embodied reasoning |
+| **Generator** | text, vision, audio, action | vision, audio, action | world simulation, future prediction, synthetic data, policy learning |
+
+This repository is the landing repo to start your physical AI journey with Cosmos. Here you can find detailed information on Cosmos models and explore [Cosmos cookbook](COOKBOOK.md) - a set of agent runnable recipes for various objectives and industries.
+
+The recipes are supported by the Cosmos platform, including [Cosmos Framework](https://nvda.ws/4zRE0Md) for training infra (SFT, LoRA, RL, distillation etc.), [Cosmos Curator](https://github.com/NVIDIA/cosmos-curator) for data curation, and [Cosmos Evaluator](https://github.com/NVIDIA/cosmos-evaluator) for model output evaluation.
+
+## Find your path
+
+<table>
+  <tr><th align="left" width="46%">I want to…</th><th align="left" width="42%">Go to</th><th align="left">Time</th></tr>
+  <tr><td><b>See it work</b> - zero install</td><td><a href="https://build.nvidia.com/nvidia/cosmos3-nano">Video generation</a>, <a href="https://build.nvidia.com/nvidia/cosmos3-nano-reasoner">visual reasoning</a></td><td>1 min</td></tr>
+  <tr><td><b>Generate my first video</b></td><td><a href="#generate-your-first-video">Quickstart ↓</a></td><td>10 min</td></tr>
+  <tr><td><b>Run generation/reasoning inference</b></td><td><a href="COOKBOOK.md#inference">Inference recipes</a></td><td>10 min</td></tr>
+  <tr><td><b>Serve an OpenAI-compatible API</b></td><td><a href="https://nvda.ws/4hUq6Tm">Serving guide:</a> vLLM, vLLM-Omni, or NIM</td><td>30 min</td></tr>
+  <tr><td><b>Post-train on my own data:</b> SFT, LoRA, distill</td><td><a href="COOKBOOK.md#post-training">Post-train</a> and <a href="COOKBOOK.md#distillation">distill</a> recipes</td><td>hours</td></tr>
+  <tr><td><b>Explore agent-runnable notebooks</b></td><td><a href="COOKBOOK.md">Cookbook</a></td><td>browse</td></tr>
+  <tr><td><b>Evaluate a model</b></td><td><a href="https://nvda.ws/3Uho0nx">Evaluation suites:</a> PAIBench, Physics-IQ, VLMEvalKit</td><td>hours</td></tr>
+  <tr><td><b>Check latency &amp; throughput</b></td><td><a href="docs/reference/inference_benchmarks.md">Performance benchmarks</a></td><td>browse</td></tr>
+</table>
+
+## Generate your first video
+
+Before running the code, request access to [nvidia/Cosmos-1.0-Guardrail](https://huggingface.co/nvidia/Cosmos-1.0-Guardrail) and accept its access conditions. Once access is granted, log in below with a Hugging Face read token from the same account. Logging in alone does not grant access.
+
+```bash
+uv venv --python 3.13 --seed --managed-python && source .venv/bin/activate
+uv pip install --torch-backend=auto \
+  "diffusers @ git+https://github.com/huggingface/diffusers.git" \
+  accelerate av cosmos_guardrail huggingface_hub imageio imageio-ffmpeg \
+  torch torchvision transformers
+uvx hf@latest auth login   # Authenticate for the gated Guardrail repository
+```
+
+```python
+import torch
+from diffusers import Cosmos3OmniPipeline
+from diffusers.utils import export_to_video
+
+pipe = Cosmos3OmniPipeline.from_pretrained(
+    "nvidia/Cosmos3-Nano", torch_dtype=torch.bfloat16, device_map="cuda"
+)
+video = pipe(prompt="A mobile robot navigates a warehouse aisle and stops at a shelf.").video
+export_to_video(video, "first_video.mp4", fps=24)
+```
+
+First run downloads the 16B checkpoint; diffusion steps are compute-heavy, so long step times are normal. Full options, image/sound modes, and every other backend: [audiovisual cookbooks](https://nvda.ws/4zd0fw5) · setup issues: [environment setup guide](https://nvda.ws/4hUq6Tm).
+
+
+## Models
+
+**Cosmos 3 ships as three base models.** Every deployment tier, one omnimodal architecture:
+
+| Base model | Size | Runs on | Best for |
+|---|---|---|---|
+| [Cosmos3-Super](https://huggingface.co/nvidia/Cosmos3-Super) | 64B | H200 / B200 / GB200 | Highest quality; synthetic data generation; teacher for distillation |
+| [Cosmos3-Nano](https://huggingface.co/nvidia/Cosmos3-Nano) | 16B | RTX Pro 6000 / H100 / B200 | Balanced speed and quality; strong base model to post-train |
+| [Cosmos3-Edge](https://huggingface.co/nvidia/Cosmos3-Edge) | 4B | Jetson AGX Orin / Thor / RTX Pro 6000 | Edge deployment; real-time robot policy and visual reasoning |
+
+**Example checkpoints** in the [cosmos3-examples](https://huggingface.co/collections/nvidia/cosmos3-examples) collection are post-trained variants of the base models. They demonstrate what [post-training with Cosmos Framework](https://nvda.ws/4zRE0Md) can specialize Cosmos for.
+
+| Example checkpoint | Base | Demonstrates |
+|---|---|---|
+| [Cosmos3-Nano-Sim-Auto&nbsp;<img src="assets/brand/badge-new.svg" alt="New" align="absmiddle">](https://huggingface.co/nvidia/Cosmos3-Nano-Sim-Auto) | Nano | Closed-loop driving simulation - multi-view + LiDAR |
+| [Cosmos3-Nano-Transfer-Auto&nbsp;<img src="assets/brand/badge-new.svg" alt="New" align="absmiddle">](https://huggingface.co/nvidia/Cosmos3-Nano-Transfer-Auto) | Nano | Multi-view driving SDG - up to 11 views + LiDAR |
+| [Cosmos3-Nano-Sim-Bimanual&nbsp;<img src="assets/brand/badge-new.svg" alt="New" align="absmiddle">](https://huggingface.co/nvidia/Cosmos3-Nano-Sim-Bimanual) | Nano | Closed-loop interactive robot policy simulation |
+| [Cosmos3-Nano-Sim-Transfer&nbsp;<img src="assets/brand/badge-new.svg" alt="New" align="absmiddle">](https://huggingface.co/nvidia/Cosmos3-Nano-Sim-Transfer) | Nano | Auto-regressive transfer - depth, segmentation, edge, blur |
+| [Cosmos3-Super-Text2Image](https://huggingface.co/nvidia/Cosmos3-Super-Text2Image) | Super | Elite quality text-to-image |
+| [Cosmos3-Super-Text2Image-4Step](https://huggingface.co/nvidia/Cosmos3-Super-Text2Image-4Step) | Super | Elite quality text-to-image, 17-25x faster |
+| [Cosmos3-Super-Image2Video](https://huggingface.co/nvidia/Cosmos3-Super-Image2Video) | Super | Elite quality image-to-video |
+| [Cosmos3-Super-Image2Video-4Step](https://huggingface.co/nvidia/Cosmos3-Super-Image2Video-4Step) | Super | Elite quality image-to-video, 17-25x faster |
+| [Cosmos3-Nano-Policy-DROID](https://huggingface.co/nvidia/Cosmos3-Nano-Policy-DROID) | Nano | Open SOTA DROID robot policy, runs on RTX Pro 6000 |
+| [Cosmos3-Edge-Policy-DROID](https://huggingface.co/nvidia/Cosmos3-Edge-Policy-DROID) | Edge | DROID robot policy at edge-deployable scale |
+
+Full I/O specs, generation settings, and supported action embodiments: [model reference](docs/reference/models.md).
+
+## Platform
+
+| Project | Purpose |
+|---|---|
+| **Cosmos** | This repo |
+| [Cosmos Framework](https://nvda.ws/4zRE0Md) | Train, optimize, and deploy physical AI models, SFT · LoRA · distillation · RL post-training, for Cosmos and beyond |
+| [Cosmos Curator](https://github.com/NVIDIA/cosmos-curator) | Distributed data curation: processing, annotation, filtering, dedup |
+| [Cosmos Evaluator](https://github.com/NVIDIA/cosmos-evaluator) | Automated evaluation system for world generation & reasoning outputs |
+
+Cosmos 3 runs on Diffusers, Transformers, vLLM, vLLM-Omni, SGLang, TensorRT-LLM, and NIM. Pick a backend in the [environment setup guide](https://nvda.ws/4hUq6Tm).
+
+## Community & contributing
+
+Questions and ideas → [Discussions](https://github.com/NVIDIA/cosmos/discussions). Bugs → [Issues](https://github.com/NVIDIA/cosmos/issues). Code and recipes → [Cosmos Framework](https://nvda.ws/4zMXvW8).
+
+## Limitations & safety
+
+Cosmos 3 can produce artifacts in long, high-resolution, or physically complex outputs (temporal inconsistency, object morphing, implausible dynamics). Safety-critical applications need additional validation and system-level safety analysis. Generation ships with [guardrails](https://nvda.ws/4hUq6Tm) on by default.
+
+## Citation & license
+
+```bibtex
+@techreport{nvidia2026cosmos3,
+  title  = {Cosmos 3: Omnimodal World Models for physical AI},
+  author = {{NVIDIA Cosmos Team}},
+  year   = {2026},
+  url    = {https://research.nvidia.com/labs/cosmos-lab/cosmos3/technical-report.pdf}
+}
+```
+
+Source code and models are released under [OpenMDW-1.1](https://openmdw.ai/license/1-1/). Custom licensing: <cosmos-license@nvidia.com>. This project may download third-party open source software; review those licenses before use.
