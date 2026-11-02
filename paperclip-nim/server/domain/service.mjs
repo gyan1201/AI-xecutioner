@@ -196,7 +196,8 @@ export function createService({ store, nim, engine, bus }) {
         approvalPolicy: "high",
         autoMode: false,
         cycleMinutes: 60,
-        maxCycles: 3,
+        // 0 = keep going. A company that stops after three cycles is a demo.
+        maxCycles: 0,
         reworkLimit: 1,
         // 0 = no limit. Budgeting is opt-in now: the product ships unlimited.
         monthlyBudgetCents: optionalNumber(budgetMonthlyCents, "Budget", { min: 0, max: 10_000_000 }) ?? 0,
@@ -241,13 +242,18 @@ export function createService({ store, nim, engine, bus }) {
           tags: ["company", "brief"],
         }),
       ];
+      // The standup runs on the company's own rhythm, and the first one is due
+      // immediately so launch → first cycle already produces a report.
+      const cadenceMinutes = Math.max(5, Number(company.settings.cycleMinutes) || 60);
       company.routines = [
         createRoutine({
-          name: "Morning standup",
+          name: "Cycle standup",
           instruction:
             "Summarise what shipped, what is blocked and what it cost. Name the single most valuable next action toward the goal.",
           agentId: company.agents.find((agent) => agent.role === "strategist")?.id ?? company.agents[0]?.id ?? null,
-          cadenceMinutes: 1440,
+          cadenceMinutes,
+          followsCycle: true,
+          nextRunAt: new Date().toISOString(),
         }),
       ];
       store.createCompany(company);
@@ -565,8 +571,19 @@ export function createService({ store, nim, engine, bus }) {
       if (!["off", "high", "all"].includes(settings.approvalPolicy)) throw httpError("approvalPolicy must be off, high or all.");
       company.settings.approvalPolicy = settings.approvalPolicy;
     }
-    if (settings.cycleMinutes !== undefined) company.settings.cycleMinutes = optionalNumber(settings.cycleMinutes, "cycleMinutes", { min: 1, max: 1440 });
-    if (settings.maxCycles !== undefined) company.settings.maxCycles = optionalNumber(settings.maxCycles, "maxCycles", { min: 1, max: 100 });
+    if (settings.cycleMinutes !== undefined) {
+      company.settings.cycleMinutes = optionalNumber(settings.cycleMinutes, "cycleMinutes", { min: 1, max: 1440 });
+      for (const routine of company.routines ?? []) {
+        if (!routine.followsCycle) continue;
+        routine.cadenceMinutes = Math.max(5, company.settings.cycleMinutes);
+        const next = new Date(routine.nextRunAt ?? 0).getTime();
+        // Pull a too-far-future run forward; never delay one that is already due.
+        if (!Number.isFinite(next) || next > Date.now() + routine.cadenceMinutes * 60_000) {
+          routine.nextRunAt = new Date().toISOString();
+        }
+      }
+    }
+    if (settings.maxCycles !== undefined) company.settings.maxCycles = optionalNumber(settings.maxCycles, "maxCycles", { min: 0, max: 100 });
     if (settings.reworkLimit !== undefined) company.settings.reworkLimit = optionalNumber(settings.reworkLimit, "reworkLimit", { min: 0, max: 5 });
     if (settings.monthlyBudgetCents !== undefined) {
       company.settings.monthlyBudgetCents = optionalNumber(settings.monthlyBudgetCents, "monthlyBudgetCents", { min: 0, max: 10_000_000 });

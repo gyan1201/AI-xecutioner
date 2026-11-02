@@ -1,5 +1,5 @@
 import { api, ago, avatar, bars, esc, icon, md, money, num, pct } from "../lib.js";
-import { agentChip, emptyState, goalDirection, goalProgress, issueRow, modelPill, pageHeader, spendBar } from "./shared.js";
+import { agentChip, emptyState, goalDirection, goalPill, goalProgress, goalTarget, issueRow, modelPill, pageHeader, spendBar } from "./shared.js";
 
 export const title = "Dashboard";
 
@@ -83,12 +83,12 @@ export async function render(root, ctx) {
           <div style="font-size:14px;font-weight:550;line-height:1.4;margin-bottom:8px">${esc(primaryGoal.title)}</div>
           <div class="progress" style="height:6px"><i style="width:${Math.round(progress * 100)}%"></i></div>
           <div class="row-between" style="margin-top:8px">
-            <span style="font-size:12px;color:var(--text-2)">${num(primaryGoal.current)} → ${num(primaryGoal.target)} ${esc(primaryGoal.unit ?? "")}</span>
-            <span class="pill accent">${Math.round(progress * 100)}%</span>
+            <span style="font-size:12px;color:var(--text-2)">${esc(goalTarget(primaryGoal))}</span>
+            <span class="pill accent">${esc(goalPill(primaryGoal))}</span>
           </div>
           <div class="row" style="gap:8px;margin-top:12px">
             <span class="tag">${esc(primaryGoal.metric || "metric")}</span>
-            <span class="tag">baseline ${num(primaryGoal.baseline)}</span>
+            <span class="tag">${primaryGoal.baseline === null || primaryGoal.baseline === undefined ? "baseline not measured yet" : `baseline ${num(primaryGoal.baseline)}`}</span>
             <span class="tag">${goalDirection(primaryGoal)}</span>
           </div>
           <div class="hint" style="margin-top:10px">Owned by ${esc(company.agents.find((agent) => agent.id === primaryGoal.ownerId)?.name ?? "unassigned")} · due ${primaryGoal.dueAt ? new Date(primaryGoal.dueAt).toLocaleDateString() : "—"}</div>

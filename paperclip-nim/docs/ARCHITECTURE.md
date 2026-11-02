@@ -12,7 +12,7 @@ HTTP request ──► routes.mjs ──► engine / service ──► store (JS
 * **`store.mjs`** owns durability: one JSON document per company, rewritten on save, plus event-bus publication. Writes are serialised through `store.withCompany`, so a run and a ledger append cannot interleave with a UI patch.
 * **`engine.mjs`** owns behaviour: `planOnly`, `planCycle`, `runIssue`, `chat`, `runRoutine`, `decideApproval`, the scheduler.
 * **`service.mjs`** owns read models: the shapes the UI renders. Views never stitch entity state together themselves.
-* **`domain/launch.mjs`** owns the full-auto planning step: it reads the goal, ranks the 36 blueprints (curated intents + weighted lexical overlap), rewrites the winner's team and backlog around the goal, and validates a model-authored draft when one is available. It is pure — no store, no network — so the same brief always produces the same company.
+* **`domain/launch.mjs`** owns the full-auto planning step: it reads the goal, ranks the 37 blueprints (curated intents + weighted lexical overlap), rewrites the winner's team and backlog around the goal, and validates a model-authored draft when one is available. It is pure — no store, no network — so the same brief always produces the same company.
 * **`nim/client.mjs`** is the only place that speaks HTTP to NVIDIA, and the only place that knows about live vs simulated.
 * **`web/`** is a thin client: 20 view modules with `render(root, ctx)`, a hash router, one SSE firehose, and helpers in `lib.js`.
 
@@ -79,7 +79,8 @@ npm test                       # 62 tests
 node --test test/engine.test.mjs
 ```
 
-* `test/catalog.test.mjs` — 97 models / 430 skills / 36 blueprints, capability coverage, defaults resolve, live merge, blueprint model references.
+* `test/company.test.mjs` — goal-sentence metrics, distinct skills per hire, blueprint routing for physical AI, routine dispatch, fair scheduling, computed goal progress, board replenishment.
+* `test/catalog.test.mjs` — 97 models / 430 skills / 37 blueprints, capability coverage, defaults resolve, live merge, blueprint model references.
 * `test/engine.test.mjs` — seed, full run, review attempt, unlimited spend + budget gate, plan, cycle + standup, approvals, knowledge search, agent CRUD, embedding geometry.
 * `test/api.test.mjs` — every route group over HTTP, including full auto: blueprint match, staffed launch, SSE step stream, key configuration without echo, and a first cycle.
 * `test/api.test.mjs` — boots the real server on an ephemeral port and walks the HTTP surface, including SSE runs and cycles.

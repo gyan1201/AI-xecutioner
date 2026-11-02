@@ -112,7 +112,7 @@ export async function render(root, ctx) {
           <div class="grid" style="grid-template-columns:1fr 1fr 1fr;margin-top:9px">
             <div class="field"><label>Monthly cap (cents)</label><input class="input" type="number" id="monthly-cap" value="${company.settings.monthlyBudgetCents ?? 0}" min="0" step="100" /><div class="hint">0 = no limit. Spend is still recorded either way.</div></div>
             <div class="field"><label>Cycle minutes</label><input class="input" type="number" id="cycle-minutes" value="${company.settings.cycleMinutes}" min="1" /></div>
-            <div class="field"><label>Max cycles</label><input class="input" type="number" id="max-cycles" value="${company.settings.maxCycles}" min="1" /></div>
+            <div class="field"><label>Max cycles</label><input class="input" type="number" id="max-cycles" value="${company.settings.maxCycles}" min="0" /><div class="hint">0 = unlimited</div></div>
           </div>
           <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:9px">
             <div class="field"><label>Rework limit</label><input class="input" type="number" id="rework-limit" value="${company.settings.reworkLimit}" min="0" max="5" /></div>

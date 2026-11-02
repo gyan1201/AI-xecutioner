@@ -72,7 +72,10 @@ export function createIssue(company, overrides = {}) {
 }
 
 export function createGoal(overrides = {}) {
-  const baseline = overrides.baseline ?? 0;
+  // A goal read out of a sentence often has a target but no baseline yet — the
+  // baseline is measured by the first run. Keep that "unknown" as null instead
+  // of pretending it is zero, which would invent progress that never happened.
+  const baseline = overrides.baseline === null ? null : overrides.baseline ?? 0;
   const target = overrides.target ?? 100;
   return {
     id: overrides.id ?? newId("goal"),
@@ -84,8 +87,9 @@ export function createGoal(overrides = {}) {
     target,
     // "Minutes per encounter" improves downward, "notes signed" upward. Infer
     // it from the numbers so a goal authored as 12 → 4 is read correctly.
-    direction: overrides.direction ?? (Number(target) < Number(baseline) ? "decrease" : "increase"),
-    current: overrides.current ?? 0,
+    direction: overrides.direction ?? (baseline === null ? "decrease" : Number(target) < Number(baseline) ? "decrease" : "increase"),
+    current: overrides.current ?? (baseline === null ? null : 0),
+    progress: overrides.progress ?? { accepted: 0, total: 0, pct: 0 },
     ownerId: overrides.ownerId ?? null,
     status: overrides.status ?? "active",
     dueAt: overrides.dueAt ?? null,
@@ -105,15 +109,21 @@ export function createProject(overrides = {}) {
 }
 
 export function createRoutine(overrides = {}) {
+  const cadenceMinutes = overrides.cadenceMinutes ?? 1440;
   return {
     id: overrides.id ?? newId("routine"),
     name: overrides.name ?? "Routine",
     instruction: overrides.instruction ?? "",
     agentId: overrides.agentId ?? null,
-    cadenceMinutes: overrides.cadenceMinutes ?? 1440,
+    cadenceMinutes,
+    // A standup that follows the company's cycle length should keep following it
+    // when the owner changes the rhythm.
+    followsCycle: overrides.followsCycle ?? false,
     enabled: overrides.enabled ?? true,
     lastRunAt: overrides.lastRunAt ?? null,
-    nextRunAt: overrides.nextRunAt ?? new Date(Date.now() + 86_400_000).toISOString(),
+    // First run follows the cadence, not a hardcoded day: a 5-minute standup
+    // that is not due for 24 hours is a routine that never fires.
+    nextRunAt: overrides.nextRunAt ?? new Date(Date.now() + cadenceMinutes * 60_000).toISOString(),
     runs: overrides.runs ?? 0,
     createdAt: overrides.createdAt ?? nowIso(),
   };
@@ -248,6 +258,20 @@ export function recomputeCompany(company) {
   for (const agent of company.agents) {
     const status = agentSpendStatus(company, agent);
     if (agent.status !== "paused") agent.status = status.overBudget ? "over_budget" : "active";
+  }
+  // Goal movement is computed, never asserted: an accepted issue is the only
+  // evidence that a goal advanced. Metric goals (minutes, percent) keep their
+  // measured unit untouched until a run actually reports a measurement.
+  for (const goal of company.goals ?? []) {
+    const linked = company.issues.filter((issue) => issue.goalId === goal.id);
+    const accepted = linked.filter((issue) => issue.status === "done").length;
+    goal.progress = {
+      accepted,
+      total: linked.length,
+      pct: linked.length ? Math.round((accepted / linked.length) * 100) : 0,
+    };
+    const countGoal = !goal.unit || goal.unit === "issues" || /deliverable/i.test(goal.metric ?? "");
+    if (countGoal && goal.baseline !== null) goal.current = accepted;
   }
   company.stats = {
     agents: company.agents.length,

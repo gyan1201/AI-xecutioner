@@ -147,6 +147,13 @@ export function modelPill(modelId) {
 }
 
 export function goalProgress(goal) {
+  // A goal read from the user's sentence can have a target and no baseline yet.
+  // Until something is measured, the honest progress is the share of linked
+  // work that has been accepted — labelled as such in the UI.
+  if (goal.baseline === null || goal.baseline === undefined) {
+    const progress = goal.progress ?? {};
+    return Math.max(0, Math.min(1, Number(progress.pct ?? 0) / 100));
+  }
   const baseline = Number(goal.baseline) || 0;
   const target = Number(goal.target) || 0;
   const current = Number(goal.current) || 0;
@@ -160,9 +167,30 @@ export function goalProgress(goal) {
 }
 
 export function goalDirection(goal) {
+  if (goal.baseline === null || goal.baseline === undefined) {
+    return goal.direction === "increase" ? "higher is better" : "lower is better";
+  }
   const baseline = Number(goal.baseline) || 0;
   const target = Number(goal.target) || 0;
   return (goal.direction ?? (target < baseline ? "decrease" : "increase")) === "decrease" ? "lower is better" : "higher is better";
+}
+
+/** The pill next to the progress bar: a share of work, never a fake number. */
+export function goalPill(goal) {
+  if (goal.baseline === null || goal.baseline === undefined) {
+    const progress = goal.progress ?? { accepted: 0, total: 0 };
+    return `${progress.accepted ?? 0}/${progress.total ?? 0} accepted`;
+  }
+  return `${Math.round(goalProgress(goal) * 100)}%`;
+}
+
+/** "5 min" for a metric goal, "3 / 6 accepted" for a count goal. */
+export function goalTarget(goal) {
+  const unit = goal.unit ? ` ${goal.unit}` : "";
+  if (goal.baseline === null || goal.baseline === undefined) {
+    return `target ${num(goal.target)}${unit}`;
+  }
+  return `${num(goal.current)} → ${num(goal.target)}${unit}`;
 }
 
 export function emptyState({ title, body, action = "" }) {

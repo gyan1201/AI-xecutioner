@@ -88,7 +88,7 @@ Connections live in `data/providers.json` (keys stay in `data/keys.json`). At ca
 
 ## From a goal to a blueprint
 
-Full auto has to choose *which* of the 36 reference architectures a one-line goal describes. `blueprints.mjs` exposes `rankBlueprints(goal)`, which scores every blueprint on two signals:
+Full auto has to choose *which* of the 37 blueprints a one-line goal describes. `blueprints.mjs` exposes `rankBlueprints(goal)`, which scores every blueprint on two signals:
 
 * **Curated intents** — a table mapping the words people actually type to a blueprint (`support`, `helpdesk`, `ticket`, `response time` → Customer Service Voice Agent; `fraud`, `chargeback`, `self-checkout` → Retail Loss Prevention). This is what stops "cut support response time" landing on the knowledge copilot because it happens to contain the word "copilot".
 * **Weighted lexical overlap** — name and category count more than prose, and a single token's contribution is capped, so a keyword repeated across a summary cannot outvote a domain match.

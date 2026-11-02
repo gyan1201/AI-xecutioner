@@ -101,7 +101,7 @@ test("health, status and bootstrap describe the running app", async () => {
   assert.equal(status.body.nim.mode, "simulation");
   assert.ok(status.body.catalog.count >= 90);
   assert.equal(status.body.skills.count, 430);
-  assert.equal(status.body.blueprints.count, 36);
+  assert.equal(status.body.blueprints.count, 37);
 
   const boot = await get("/api/bootstrap");
   assert.ok(boot.body.companies.length >= 1);
@@ -200,8 +200,8 @@ test("skills, blueprints and capability metadata are served", async () => {
   assert.ok(suggest.body.skills.length > 0);
 
   const blueprints = await get("/api/blueprints");
-  assert.equal(blueprints.body.blueprints.length, 36);
-  assert.equal(blueprints.body.stats.count, 36);
+  assert.equal(blueprints.body.blueprints.length, 37);
+  assert.equal(blueprints.body.stats.count, 37);
 
   const one = await get(`/api/blueprints/${blueprints.body.blueprints[0].id}`);
   assert.ok(one.body.blueprint.team.length >= 2);
@@ -507,7 +507,9 @@ test("a second blueprint joins the goal instead of forking or stealing it", asyn
   assert.equal(activeGoals.length, 1, "one company, one active goal");
   assert.equal(activeGoals[0].id, firstGoal.id);
   assert.equal(activeGoals[0].ownerId, firstOwner, "hiring a second pod must not hand over the goal");
-  assert.equal(activeGoals[0].metric, "minutes per encounter", "the blueprint metric survives the merge");
+  // The mission sentence names its own metric now, so the goal keeps that
+  // reading across a second deploy instead of reverting to a template name.
+  assert.equal(activeGoals[0].metric, "clinician documentation time", "the goal reading survives the merge");
   assert.equal(imaging.body.company.issues.filter((issue) => /^lock the metric and baseline/i.test(issue.title)).length <= 1, true);
 });
 

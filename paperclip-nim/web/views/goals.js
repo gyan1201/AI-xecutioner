@@ -1,5 +1,5 @@
 import { api, esc, icon, modal, money, num, toast } from "../lib.js";
-import { emptyState, goalDirection, goalProgress, pageHeader } from "./shared.js";
+import { emptyState, goalDirection, goalPill, goalProgress, goalTarget, pageHeader } from "./shared.js";
 
 export const title = "Goals";
 
@@ -32,14 +32,14 @@ export async function render(root, ctx) {
                   <div class="hint" style="min-height:34px">${esc(goal.description || "No description.")}</div>
                   <div class="progress" style="height:6px"><i style="width:${Math.round(progress * 100)}%"></i></div>
                   <div class="row-between" style="font-size:12px">
-                    <span style="color:var(--text-2)">${num(goal.current)} → ${num(goal.target)} ${esc(goal.unit)}</span>
-                    <span class="pill ${progress >= 1 ? "green" : ""}">${Math.round(progress * 100)}%</span>
+                    <span style="color:var(--text-2)">${esc(goalTarget(goal))}</span>
+                    <span class="pill ${progress >= 1 ? "green" : ""}">${esc(goalPill(goal))}</span>
                   </div>
                   <div class="row" style="gap:6px;flex-wrap:wrap">
                     <span class="tag">${esc(goal.metric || "metric")}</span>
-                    <span class="tag">baseline ${num(goal.baseline)}</span>
+                    <span class="tag">${goal.baseline === null || goal.baseline === undefined ? "baseline not measured yet" : `baseline ${num(goal.baseline)}`}</span>
                     <span class="tag">${goalDirection(goal)}</span>
-                    <span class="tag">${goal.issues} issues · ${goal.done} done</span>
+                    <span class="tag">${goal.progress?.accepted ?? goal.done} of ${goal.progress?.total ?? goal.issues} accepted</span>
                   </div>
                   <div class="hint">Owner ${esc(goal.owner ?? "unassigned")}${goal.dueAt ? ` · due ${new Date(goal.dueAt).toLocaleDateString()}` : ""}</div>
                 </div>`;

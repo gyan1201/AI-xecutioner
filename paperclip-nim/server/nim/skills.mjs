@@ -124,3 +124,104 @@ export function skillStats() {
     listing: catalog.listing,
   };
 }
+
+/* ---------------------------------------------------------------- matching */
+
+/**
+ * Which corner of the catalog a domain lives in. A support company needs
+ * retrieval and voice skills; a robotics company needs simulation and
+ * calibration. Used to keep a hire from arriving with a generic RAG pair
+ * because the role title was vague.
+ */
+const DOMAIN_SIGNALS = [
+  { test: /support|contact cent|ticket|triage|reply|help ?desk|customer/i, categories: ["RAG & Retrieval", "Speech & Voice", "Agentic AI & NIM"], words: ["retrieval", "rag", "policy", "voice", "triage", "support", "ticket"] },
+  { test: /robot|manipulat|embodied|teleop|physical|humanoid|grasp|sim2real/i, categories: ["Robotics & Simulation", "Vision & Video", "Accelerated Computing"], words: ["robot", "simulation", "calibration", "teleop", "pose", "omniverse", "grasp"] },
+  { test: /clinician|patient|clinical|radiolog|imaging|scribe|health/i, categories: ["Healthcare & MedTech", "Speech & Voice", "RAG & Retrieval"], words: ["clinical", "healthcare", "medical", "voice", "phi"] },
+  { test: /gene|genomic|protein|drug|molecul|biolog/i, categories: ["Biology & Drug Discovery", "Accelerated Computing"], words: ["protein", "genom", "molecul", "boltz", "diffdock", "parabricks"] },
+  { test: /video|camera|stream|cctv|surveillance/i, categories: ["Vision & Video", "Robotics & Simulation"], words: ["video", "stream", "rtsp", "vision", "vlm"] },
+  { test: /fraud|security|guardrail|safety|compliance/i, categories: ["Security & Safety", "Agentic AI & NIM"], words: ["guardrail", "safety", "fraud", "policy", "security"] },
+  { test: /route|logistic|fleet|delivery|warehouse/i, categories: ["Optimization", "Agentic AI & NIM"], words: ["routing", "cuopt", "optimization", "fleet"] },
+  { test: /weather|climate|forecast|earth/i, categories: ["Climate & Earth"], words: ["weather", "climate", "fourcastnet", "earth"] },
+];
+
+/* A title says what the person is for; the skill catalogue says what exists.
+ * These bridges stop "Implementation Engineer" from scoring on the word
+ * "engineer" and landing on whatever sorts first alphabetically. */
+const ROLE_SIGNALS = [
+  { test: /architect|solution|strateg|principal|lead/i, words: ["blueprint", "architecture", "reference", "deploy", "design", "pipeline"] },
+  { test: /implement|engineer|builder|developer|integration/i, words: ["build", "deploy", "pipeline", "integration", "client", "asr", "finetune", "service"] },
+  { test: /quality|review|critic|qa|safety|compliance|auditor/i, words: ["eval", "evaluation", "test", "guardrail", "safety", "benchmark", "audit", "red team"] },
+  { test: /analyst|research|scientist|data/i, words: ["analysis", "research", "dataset", "report", "metrics"] },
+  { test: /sre|ops|delivery|operator|reliability/i, words: ["deploy", "observability", "runtime", "runbook", "incident"] },
+];
+
+const STOP_WORDS = new Set(["the", "and", "for", "with", "from", "that", "this", "into", "over", "under", "than", "your", "their", "when", "what", "will", "must", "each"]);
+
+function tokens(text) {
+  return String(text ?? "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length > 2 && !STOP_WORDS.has(word));
+}
+
+/** Domain categories + vocabulary implied by a company's mission and blueprint. */
+export function domainProfile(text = "") {
+  const categories = new Set();
+  const words = new Set(tokens(text));
+  for (const signal of DOMAIN_SIGNALS) {
+    if (!signal.test.test(String(text))) continue;
+    signal.categories.forEach((category) => categories.add(category));
+    signal.words.forEach((word) => words.add(word));
+  }
+  return { categories: [...categories], words: [...words] };
+}
+
+/**
+ * Pick skills for one role. Scores on domain category, domain vocabulary and the
+ * role's own title, then avoids handing two agents in the same team the same
+ * skills — a team where everyone carries `rag-blueprint` has not been staffed.
+ */
+export function suggestSkillsForRole({ title = "", role = "", domain = "", text = "", used = new Set(), limit = 2 } = {}) {
+  const catalog = loadSkills();
+  const profile = domainProfile(`${domain} ${text}`);
+  const roleWords = new Set(tokens(`${title} ${role}`));
+  for (const signal of ROLE_SIGNALS) {
+    if (!signal.test.test(`${title} ${role}`)) continue;
+    signal.words.forEach((word) => roleWords.add(word));
+  }
+  const domainWords = new Set([...profile.words, ...tokens(`${domain} ${text}`)]);
+
+  const scored = catalog.skills.map((skill) => {
+    const haystack = `${skill.id} ${skill.title} ${skill.description} ${(skill.tags ?? []).join(" ")}`.toLowerCase();
+    let score = 0;
+    if (profile.categories.includes(skill.category)) score += 6;
+    for (const word of roleWords) if (haystack.includes(word)) score += 3;
+    for (const word of domainWords) if (haystack.includes(word)) score += 1;
+    // A skill from outside the domain's categories can still be right, but it has
+    // to out-score everything inside them — otherwise a support hire arrives
+    // carrying a robotics skill because one word overlapped.
+    if (profile.categories.length && !profile.categories.includes(skill.category)) score *= 0.25;
+    return { skill, score, unique: !used.has(skill.id) };
+  });
+
+  const ranked = scored
+    .filter((row) => row.score > 0)
+    .sort((a, b) => Number(b.unique) - Number(a.unique) || b.score - a.score || a.skill.id.localeCompare(b.skill.id));
+
+  const picked = [];
+  for (const row of ranked) {
+    if (picked.length >= limit) break;
+    picked.push(row.skill.id);
+  }
+  // A role with no signal still gets something specific to the domain rather
+  // than nothing at all.
+  if (picked.length === 0) {
+    for (const skill of catalog.skills) {
+      if (!profile.categories.includes(skill.category) || used.has(skill.id)) continue;
+      picked.push(skill.id);
+      if (picked.length >= limit) break;
+    }
+  }
+  for (const id of picked) used.add(id);
+  return picked;
+}
