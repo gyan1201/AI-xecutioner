@@ -144,7 +144,7 @@ The Paperclip loop, intact, with NVIDIA as the only model provider:
 * **Agents** — roster tiles, hire modal (role, reporting line, model, remit, capabilities, budget, skills), per-agent profile with 14-day spend, assigned issues, run history, live chat with citations/tools/cost, skills, instructions and runtime knobs.
 * **Org chart** — the reporting tree plus roster economics.
 * **Goals / Projects / Routines** — metric targets, containers, and scheduled prompts you can run on demand.
-* **Spend** — 4 stat cards, a 14-day spend chart, spend by model, the per-agent spend table with optional caps, and the full ledger.
+* **Spend** — 4 stat cards, a 14-day spend chart, spend by model, the per-agent spend table with optional caps, and the full ledger. Each row records whether the call was **simulated**, so a demo never looks like billed inference.
 * **Activity** — kind-filtered audit trail with the raw event drawer.
 * **Knowledge** — documents embedded with a NIM embedding model, chunked and reranked before every agent context, plus a retrieval playground that shows embed and rerank scores side by side.
 

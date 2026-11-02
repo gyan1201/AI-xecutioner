@@ -96,7 +96,7 @@ export async function render(root, ctx) {
                 <td class="dim nowrap" style="font-size:11px">${ago(row.at)}</td>
                 <td class="nowrap">${esc(agent?.name ?? "system")}</td>
                 <td class="mono" style="font-size:10.5px">${esc(row.model.split("/").pop())}</td>
-                <td><span class="tag">${esc(row.endpoint)}</span></td>
+                <td><span class="tag">${esc(row.endpoint)}</span>${row.simulated ? ` <span class="tag" title="Served by the deterministic simulator — no billed inference">sim</span>` : ""}</td>
                 <td class="dim nowrap">${num(row.inputTokens)} / ${num(row.outputTokens)}</td>
                 <td class="nowrap">${money(row.costCents, { precise: true })}</td>
               </tr>`;

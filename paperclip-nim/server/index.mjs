@@ -43,7 +43,15 @@ server.listen(port, "0.0.0.0", async () => {
   console.log("");
   console.log("  ✂  Paperclip × NVIDIA NIM");
   console.log(`  ├─ listening   http://0.0.0.0:${port}`);
-  console.log(`  ├─ mode        ${config.mode.toUpperCase()}${config.mode === "simulation" ? "  (no key — deterministic simulator)" : `  (key ${config.keyHint})`}`);
+  // A stored-but-unverified key is not "no key": say which one it is, because
+  // the difference decides whether calls are billed inference or the simulator.
+  const modeNote =
+    config.mode === "live"
+      ? `  (key ${config.keyHint})`
+      : config.keyPresent
+        ? `  (key ${config.keyHint} stored, not verified — deterministic simulator)`
+        : "  (no key — deterministic simulator)";
+  console.log(`  ├─ mode        ${config.mode.toUpperCase()}${modeNote}`);
   console.log(`  ├─ NIM base    ${config.baseUrl}`);
   console.log(`  ├─ models      ${runtime.catalog.models.length} in catalog (${live})`);
   console.log(`  └─ data        ${config.paths.data}`);

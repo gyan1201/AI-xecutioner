@@ -309,6 +309,7 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
                 usage: usageEvent.usage,
                 cost: usageEvent.cost,
                 endpoint: usageEvent.endpoint,
+                simulated: usageEvent.simulated,
               });
               run.costCents += row.costCents;
               issue.spendCents = (issue.spendCents ?? 0) + row.costCents;
@@ -584,6 +585,7 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
               usage: usageEvent.usage,
               cost: usageEvent.cost,
               endpoint: usageEvent.endpoint,
+              simulated: usageEvent.simulated,
             });
             run.costCents += row.costCents;
             notify(company, { type: "ledger.recorded", payload: { row, runId: run.id } });
@@ -716,6 +718,7 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
               usage: usageEvent.usage,
               cost: usageEvent.cost,
               endpoint: usageEvent.endpoint,
+              simulated: usageEvent.simulated,
             });
             run.costCents += row.costCents;
           },
@@ -839,6 +842,7 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
               usage: usageEvent.usage,
               cost: usageEvent.cost,
               endpoint: usageEvent.endpoint,
+              simulated: usageEvent.simulated,
             });
             run.costCents += row.costCents;
           },

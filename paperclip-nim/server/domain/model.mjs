@@ -196,7 +196,7 @@ export function pushActivity(company, { kind, actorId = "system", subject = "", 
   return entry;
 }
 
-export function recordLedger(company, { runId, agentId, model, usage, cost, endpoint = "" }) {
+export function recordLedger(company, { runId, agentId, model, usage, cost, endpoint = "", simulated = false }) {
   const row = {
     id: newId("led"),
     at: nowIso(),
@@ -209,6 +209,9 @@ export function recordLedger(company, { runId, agentId, model, usage, cost, endp
     costCents: Math.max(0, Math.round((cost?.cents ?? 0) * 100) / 100),
     costDollars: cost?.dollars ?? 0,
     endpoint,
+    // Simulation is a routing decision, not a secret: the ledger says so, so a
+    // demo never looks like billed inference.
+    simulated: Boolean(simulated),
   };
   company.ledger.unshift(row);
   if (company.ledger.length > 4000) company.ledger.length = 4000;
