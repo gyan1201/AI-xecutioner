@@ -181,6 +181,17 @@ There is no account, no telemetry and no cloud dependency: `data/` is the whole 
 
 ---
 
+## Front-end invariants
+
+Two rules keep the shell from ever painting an empty page, and `test/ui.test.mjs` enforces both:
+
+* **`[hidden]` must beat author CSS.** `styles.css` declares `[hidden] { display: none !important; }`. The palette, modal and drawer roots all set `display: flex/grid`, which otherwise overrides the user-agent `[hidden]` rule and stacks three dark scrims over the app on first paint — the app looks blank while the JS and API are perfectly healthy.
+* **Overlays toggle via the `hidden` property**, never a class, so the rule above always applies.
+
+`index.html` also carries a static boot shell (the ✂ mark, `#boot-status`, `<noscript>`) plus a classic-script `window.__pcFail` fallback on `error` / `unhandledrejection` / an 8s watchdog, and `app.js` sets `window.__pcBooted = true` after the first render. If the module graph ever fails, you get a readable message instead of a blank screen.
+
+---
+
 ## Notes and limits
 
 * **Simulation is not inference.** It is deterministic, structured and honest about being simulated — useful for exploring the product and for tests, but it will not surprise you with a better answer.

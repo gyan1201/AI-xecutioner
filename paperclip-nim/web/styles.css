@@ -39,6 +39,11 @@
 }
 
 * { box-sizing: border-box; }
+
+/* `hidden` must win: overlays below set `display: flex/grid`, which would
+   otherwise override the attribute and stack three dark scrims over the app
+   on first paint (which looks exactly like a blank page). */
+[hidden] { display: none !important; }
 html, body { height: 100%; }
 body {
   margin: 0;
