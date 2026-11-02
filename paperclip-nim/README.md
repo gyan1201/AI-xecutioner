@@ -13,6 +13,13 @@ Zero runtime dependencies. One Node process. Data on disk. Runs offline in a det
   └─ data        ./data
 ```
 
+![Dashboard](docs/screenshot-dashboard.jpg)
+
+| | |
+| --- | --- |
+| ![Skills](docs/screenshot-skills.jpg) | ![Models](docs/screenshot-models.jpg) |
+| ![Blueprints](docs/screenshot-blueprints.jpg) | ![Studio](docs/screenshot-studio.jpg) |
+
 ---
 
 ## Quick start
