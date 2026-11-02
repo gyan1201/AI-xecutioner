@@ -23,6 +23,7 @@ export async function render(root, ctx) {
   };
 
   const totalSpend = agents.reduce((sum, agent) => sum + agent.spend.spentCents, 0);
+  const capped = agents.filter((agent) => !agent.spend.unlimited);
   const cap = agents.reduce((sum, agent) => sum + agent.spend.capCents, 0);
   const skills = agents.reduce((sum, agent) => sum + agent.skills, 0);
 
@@ -45,7 +46,7 @@ export async function render(root, ctx) {
           <div class="kv"><span class="k">Agents</span><span class="v">${agents.length}</span></div>
           <div class="kv"><span class="k">Active</span><span class="v">${agents.filter((agent) => agent.status === "active").length}</span></div>
           <div class="kv"><span class="k">Combined spend</span><span class="v">${money(totalSpend, { precise: true })}</span></div>
-          <div class="kv"><span class="k">Combined cap</span><span class="v">${money(cap)}</span></div>
+          <div class="kv"><span class="k">Combined cap</span><span class="v">${capped.length ? money(cap) : "no limit"}</span></div>
           <div class="kv"><span class="k">Open issues</span><span class="v">${agents.reduce((sum, agent) => sum + agent.openIssues, 0)}</span></div>
           <div class="kv"><span class="k">Skills assigned</span><span class="v">${skills}</span></div>
         </div>

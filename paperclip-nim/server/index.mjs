@@ -17,6 +17,8 @@ runMigrations();
 
 const runtime = createRuntime();
 runtime.service.ensureSeed();
+// Budgeting is opt-in: existing companies with caps are moved to unlimited once.
+runtime.service.removeBudgetLimits();
 runtime.startSchedulers();
 
 const handler = createApp(runtime);

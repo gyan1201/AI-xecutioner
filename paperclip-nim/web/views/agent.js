@@ -42,7 +42,7 @@ export async function render(root, ctx) {
         </div>
       </div>
       <div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));gap:14px">
-        <div><div class="kpi"><b>${money(spend.spentCents, { precise: true })}</b><span>Spent · cap ${money(spend.capCents)}</span></div>${spendBar(spend, { compact: true })}</div>
+        <div><div class="kpi"><b>${money(spend.spentCents, { precise: true })}</b><span>Spent · ${spend.unlimited ? "no limit" : `cap ${money(spend.capCents)}`}</span></div>${spendBar(spend, { compact: true })}</div>
         <div><div class="kpi"><b>${issues.filter((issue) => issue.status !== "done").length}</b><span>Open issues</span></div></div>
         <div><div class="kpi"><b>${runs.length}</b><span>Recent runs</span></div></div>
         <div><div class="kpi"><b>${skills.length}</b><span>NVIDIA skills</span></div></div>

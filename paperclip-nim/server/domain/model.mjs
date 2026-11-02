@@ -37,7 +37,8 @@ export function createAgent(overrides = {}) {
     skills: overrides.skills ?? [],
     reportsTo: overrides.reportsTo ?? null,
     status: overrides.status ?? "active",
-    monthlyBudgetCents: overrides.monthlyBudgetCents ?? 2000,
+    // 0 = unlimited (the default); set a positive cap to re-enable budgeting.
+    monthlyBudgetCents: overrides.monthlyBudgetCents ?? 0,
     accent: overrides.accent ?? "#76b900",
     createdAt: overrides.createdAt ?? nowIso(),
   };
@@ -214,17 +215,23 @@ export function recordLedger(company, { runId, agentId, model, usage, cost, endp
   return row;
 }
 
+/**
+ * Spend is tracked either way; the cap only gates work when one is set.
+ * `monthlyBudgetCents` of 0 (or absent) means **no limit** — the product ships
+ * unlimited, and a company or agent can opt back into a ceiling at any time.
+ */
 export function agentSpendStatus(company, agent) {
   const spent = agentSpend(company, agent.id, { sinceDays: 30 });
   const cap = agent.monthlyBudgetCents ?? 0;
-  // A cap of 0 is "no allowance", not "unlimited": the run gate must stop it.
-  const ratio = cap > 0 ? spent / cap : 1;
+  const unlimited = !(cap > 0);
   return {
     spentCents: spent,
-    capCents: cap,
-    ratio,
-    remainingCents: Math.max(0, cap - spent),
-    overBudget: spent >= cap,
+    capCents: unlimited ? 0 : cap,
+    unlimited,
+    ratio: unlimited ? 0 : spent / cap,
+    // `null` rather than Infinity: every remaining-cents value is serialised to JSON.
+    remainingCents: unlimited ? null : Math.max(0, cap - spent),
+    overBudget: !unlimited && spent >= cap,
   };
 }
 
@@ -242,7 +249,8 @@ export function recomputeCompany(company) {
     blockedIssues: company.issues.filter((issue) => issue.status === "blocked").length,
     pendingApprovals: company.approvals.filter((approval) => approval.status === "pending").length,
     spentCents: Math.round(company.ledger.reduce((sum, row) => sum + row.costCents, 0) * 100) / 100,
-    monthlyBudgetCents: company.settings.monthlyBudgetCents,
+    monthlyBudgetCents: company.settings.monthlyBudgetCents ?? 0,
+    budgetUnlimited: !((company.settings.monthlyBudgetCents ?? 0) > 0),
     runs: company.runs.length,
     updatedAt: nowIso(),
   };

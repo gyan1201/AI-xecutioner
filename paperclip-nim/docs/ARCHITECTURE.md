@@ -19,7 +19,7 @@ HTTP request ──► routes.mjs ──► engine / service ──► store (JS
 
 `runIssue` is the core product behaviour. It is intentionally deterministic in its ordering:
 
-1. **Plan** — resolve assignee, budget gate, approval gate.
+1. **Plan** — resolve assignee, budget gate (only when a cap is set), approval gate.
 2. **Guardrail (input)** — safety NIM over the issue brief.
 3. **Retrieve** — chunk the knowledge base, embed, cosine search, rerank.
 4. **Tools** — the agent may call `knowledge_search`, `calculator`, `create_artifact`, `generate_image`, `check_safety`, `escalate` or `update_issue`, bounded by `MAX_TOOL_HOPS` (3).
@@ -68,7 +68,7 @@ node --test test/engine.test.mjs
 ```
 
 * `test/catalog.test.mjs` — 97 models / 430 skills / 36 blueprints, capability coverage, defaults resolve, live merge, blueprint model references.
-* `test/engine.test.mjs` — seed, full run, review attempt, budget gate, plan, cycle + standup, approvals, knowledge search, agent CRUD, embedding geometry.
+* `test/engine.test.mjs` — seed, full run, review attempt, unlimited spend + budget gate, plan, cycle + standup, approvals, knowledge search, agent CRUD, embedding geometry.
 * `test/api.test.mjs` — boots the real server on an ephemeral port and walks the HTTP surface, including SSE runs and cycles.
 
 Every test writes to `PAPERCLIP_DATA_DIR` in a temp directory, so `data/` is never touched and tests can run in parallel with the dev server.

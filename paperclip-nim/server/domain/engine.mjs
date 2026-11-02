@@ -82,10 +82,12 @@ export function createEngine({ store, nim, bus }) {
 
   function budgetFor(company, agent) {
     const spend = agentSpendStatus(company, agent);
+    const companyCapCents = company.settings.monthlyBudgetCents ?? 0;
     return {
       ...spend,
       companySpentCents: Math.round(company.ledger.reduce((sum, row) => sum + row.costCents, 0)),
-      companyCapCents: company.settings.monthlyBudgetCents ?? 0,
+      companyCapCents,
+      companyUnlimited: !(companyCapCents > 0),
     };
   }
 
@@ -104,7 +106,7 @@ Working agreements:
 - Be concrete. Name the change, the metric it moves, and the evidence.
 - Cite company knowledge as [1], [2] when you use it. Never invent a metric, customer quote or dashboard.
 - If the evidence is missing, say what would settle it and how much it would cost.
-- Stay inside your monthly budget of $${(agent.monthlyBudgetCents / 100).toFixed(2)}.
+${(agent.monthlyBudgetCents ?? 0) > 0 ? `- Stay inside your monthly budget of $${(agent.monthlyBudgetCents / 100).toFixed(2)}.` : "- No spend limit is set; keep each run focused anyway."}
 ${agent.instructions ? `\nRole instructions:\n${agent.instructions}` : ""}${skillPrompt(agent.skills)}
 `;
     if (mode === "review") {
@@ -242,7 +244,7 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
         throw error;
       }
       const budget = budgetFor(company, agent);
-      if (budget.overBudget) {
+      if (!budget.unlimited && budget.overBudget) {
         issue.status = "blocked";
         issue.blockedReason = `${agent.name} is over the monthly cap ($${(budget.spentCents / 100).toFixed(2)} of $${(budget.capCents / 100).toFixed(2)}).`;
         issue.updatedAt = nowIso();
@@ -256,7 +258,7 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
         recomputeCompany(company);
         return { blocked: true, reason: issue.blockedReason, issue, run: null };
       }
-      if (budget.companyCapCents && budget.companySpentCents >= budget.companyCapCents) {
+      if (!budget.companyUnlimited && budget.companySpentCents >= budget.companyCapCents) {
         issue.status = "blocked";
         issue.blockedReason = `Company budget exhausted ($${(budget.companySpentCents / 100).toFixed(2)} of $${(budget.companyCapCents / 100).toFixed(2)}).`;
         issue.updatedAt = nowIso();
@@ -534,7 +536,7 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
         throw error;
       }
       const budget = budgetFor(company, ceo);
-      if (budget.overBudget) {
+      if (!budget.unlimited && budget.overBudget) {
         const error = new Error(`${ceo.name} is over budget; the planning call would exceed the cap.`);
         error.status = 409;
         error.code = "over_budget";
@@ -817,7 +819,7 @@ Write the deliverable now. Use tools if they make the answer more verifiable.`;
       const messages = [
         {
           role: "system",
-          content: `Task type: chat\n\n${systemPrompt({ company, agent, issue })}\nBudget remaining: $${(budget.remainingCents / 100).toFixed(2)} of $${(budget.capCents / 100).toFixed(2)}.\nAnswer in chat style: short paragraphs, cite sources as [1], do not repeat the question.`,
+          content: `Task type: chat\n\n${systemPrompt({ company, agent, issue })}\n${budget.unlimited ? "No budget limit." : `Budget remaining: $${(budget.remainingCents / 100).toFixed(2)} of $${(budget.capCents / 100).toFixed(2)}.`}\nAnswer in chat style: short paragraphs, cite sources as [1], do not repeat the question.`,
         },
         ...(issue ? [{ role: "system", content: `The user is looking at ${issue.key} — ${issue.title}.\n\n${renderContext(retrieval.passages)}` }] : []),
         ...prior,

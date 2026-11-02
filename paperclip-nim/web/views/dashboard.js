@@ -41,7 +41,7 @@ export async function render(root, ctx) {
       <div class="stat">
         <div class="row-between"><div class="stat-value">${stats.activeAgents}<small>/${stats.agents}</small></div><span class="stat-icon">${icon("agents", "")}</span></div>
         <div class="stat-label">Agents enabled</div>
-        <div class="stat-sub">${stats.agents - stats.activeAgents} paused or over budget</div>
+        <div class="stat-sub">${dashboard.spend.unlimited ? "running without a spend limit" : `${stats.agents - stats.activeAgents} paused or over budget`}</div>
       </div>
       <div class="stat">
         <div class="row-between"><div class="stat-value">${stats.issuesInProgress}</div><span class="stat-icon">${icon("issues", "")}</span></div>
@@ -51,7 +51,7 @@ export async function render(root, ctx) {
       <div class="stat">
         <div class="row-between"><div class="stat-value">${money(dashboard.spend.totalCents)}</div><span class="stat-icon">${icon("budget", "")}</span></div>
         <div class="stat-label">Month spend</div>
-        <div class="stat-sub">${money(dashboard.spend.weekCents)} this week · cap ${money(dashboard.spend.capCents)}</div>
+        <div class="stat-sub">${money(dashboard.spend.weekCents)} this week · ${dashboard.spend.unlimited ? "no limit" : `cap ${money(dashboard.spend.capCents)}`}</div>
       </div>
       <div class="stat">
         <div class="row-between"><div class="stat-value">${stats.pendingApprovals}</div><span class="stat-icon">${icon("approvals", "")}</span></div>

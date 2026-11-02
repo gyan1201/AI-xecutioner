@@ -287,6 +287,34 @@ test("approvals decide through the API", async () => {
   assert.equal(bad.status, 400);
 });
 
+test("no spend limit by default, and a cap can still be added", async () => {
+  const created = await post("/api/companies", { name: "Unlimited Co", mission: "Ship without a ceiling." });
+  assert.equal(created.status, 200);
+  const company = created.body.company;
+  assert.equal(company.settings.monthlyBudgetCents ?? 0, 0, "a new company must start unlimited");
+  assert.equal(company.stats.budgetUnlimited, true);
+
+  const agent = await post(`/api/companies/${company.id}/agents`, {
+    name: "No Cap",
+    title: "Delivery",
+    role: "operator",
+  });
+  assert.equal(agent.status, 200);
+  assert.equal(agent.body.agent.monthlyBudgetCents ?? 0, 0, "a new agent must start unlimited");
+
+  // Budgeting stays available: set a ceiling and it is read back as a real cap.
+  const capped = await patch(`/api/companies/${company.id}`, { settings: { monthlyBudgetCents: 500 } });
+  assert.equal(capped.status, 200);
+  const ledger = await get(`/api/companies/${company.id}/ledger`);
+  assert.equal(ledger.body.capCents, 500);
+  assert.equal(ledger.body.unlimited, false);
+
+  // …and 0 puts it back to unlimited.
+  await patch(`/api/companies/${company.id}`, { settings: { monthlyBudgetCents: 0 } });
+  const after = await get(`/api/companies/${company.id}/ledger`);
+  assert.equal(after.body.unlimited, true);
+});
+
 test("agencies: agents, skills, goals, projects, routines and knowledge all mutate", async () => {
   const agent = await post(`/api/companies/${companyId}/agents`, {
     name: "Nadia Okafor",

@@ -58,6 +58,40 @@ function optionalNumber(value, field, { min = -1e12, max = 1e12 } = {}) {
 export function createService({ store, nim, engine, bus }) {
   /* -------------------------------------------------------------- seeding */
 
+  /** A share of the company cap, or 0 (unlimited) when the company is unlimited. */
+  function shareOfCap(capCents, share) {
+    const cap = capCents ?? 0;
+    return cap > 0 ? Math.round(cap * share) : 0;
+  }
+
+  /**
+   * Budgeting is opt-in now, so existing companies that carry caps are moved to
+   * "unlimited" once. The old numbers are kept on the record (nothing is
+   * destroyed) in case an operator wants a ceiling back.
+   */
+  function removeBudgetLimits() {
+    const migrated = [];
+    for (const summary of store.listCompanies()) {
+      const company = store.getCompany(summary.id);
+      if (!company || company.settings?.budgetLimitsRemovedAt) continue;
+      const companyCap = company.settings.monthlyBudgetCents ?? 0;
+      company.settings.legacyMonthlyBudgetCents = companyCap > 0 ? companyCap : null;
+      company.settings.monthlyBudgetCents = 0;
+      company.settings.budgetLimitsRemovedAt = nowIso();
+      for (const agent of company.agents ?? []) {
+        if ((agent.monthlyBudgetCents ?? 0) > 0) {
+          agent.legacyMonthlyBudgetCents = agent.monthlyBudgetCents;
+          agent.monthlyBudgetCents = 0;
+        }
+        if (agent.status === "over_budget") agent.status = "active";
+      }
+      recomputeCompany(company);
+      store.saveCompany(company);
+      migrated.push(company.id);
+    }
+    return migrated;
+  }
+
   function ensureSeed() {
     const existing = store.getCompany("co_northwind");
     if (existing) return existing;
@@ -130,7 +164,7 @@ export function createService({ store, nim, engine, bus }) {
     return view;
   }
 
-  async function createCompany({ name, mission = "", blueprintId = null, budgetMonthlyCents = 12_000 }) {
+  async function createCompany({ name, mission = "", blueprintId = null, budgetMonthlyCents = 0 }) {
     const cleanName = requireString(name, "Company name", { max: 80 });
     const id = `co_${slugify(cleanName).replace(/-/g, "_")}_${Math.random().toString(36).slice(2, 5)}`;
     const issuePrefix = cleanName
@@ -154,7 +188,8 @@ export function createService({ store, nim, engine, bus }) {
         cycleMinutes: 60,
         maxCycles: 3,
         reworkLimit: 1,
-        monthlyBudgetCents: optionalNumber(budgetMonthlyCents, "Budget", { min: 100, max: 10_000_000 }) ?? 12_000,
+        // 0 = no limit. Budgeting is opt-in now: the product ships unlimited.
+        monthlyBudgetCents: optionalNumber(budgetMonthlyCents, "Budget", { min: 0, max: 10_000_000 }) ?? 0,
         guardrails: { safetyCheck: true, blockUnsafe: true, redactSecrets: true },
         defaultModels: {
           strategist: selectModel("reasoning"),
@@ -209,7 +244,7 @@ export function createService({ store, nim, engine, bus }) {
       title: "Chief Executive",
       model: company.settings.defaultModels.strategist,
       reportsTo: null,
-      monthlyBudgetCents: Math.round(company.settings.monthlyBudgetCents * 0.2),
+      monthlyBudgetCents: shareOfCap(company.settings.monthlyBudgetCents, 0.2),
       description: "Sets the cycle focus and owns the goal.",
       instructions: "Turn the company goal into a ranked, dependency-aware plan. Never assign work without a definition of done.",
       capabilities: ["reasoning", "chat", "tools"],
@@ -221,7 +256,7 @@ export function createService({ store, nim, engine, bus }) {
       title: "Head of Delivery",
       model: company.settings.defaultModels.operator,
       reportsTo: ceo.id,
-      monthlyBudgetCents: Math.round(company.settings.monthlyBudgetCents * 0.3),
+      monthlyBudgetCents: shareOfCap(company.settings.monthlyBudgetCents, 0.3),
       description: "Produces the deliverables.",
       instructions: "Produce work a reviewer can accept: the change, the metric, the evidence, the rollback.",
       capabilities: ["chat", "tools", "vision"],
@@ -233,7 +268,7 @@ export function createService({ store, nim, engine, bus }) {
       title: "Quality Lead",
       model: company.settings.defaultModels.critic,
       reportsTo: ceo.id,
-      monthlyBudgetCents: Math.round(company.settings.monthlyBudgetCents * 0.1),
+      monthlyBudgetCents: shareOfCap(company.settings.monthlyBudgetCents, 0.1),
       description: "Accepts work or sends it back with the exact fix.",
       instructions: "Judge against acceptance criteria only. Reply with JSON. Be hard to impress and specific.",
       capabilities: ["reasoning", "chat"],
@@ -417,7 +452,7 @@ export function createService({ store, nim, engine, bus }) {
       instructions: String(payload.instructions ?? "").slice(0, 4000),
       model,
       temperature: optionalNumber(payload.temperature, "temperature", { min: 0, max: 2 }) ?? 0.4,
-      monthlyBudgetCents: optionalNumber(payload.monthlyBudgetCents, "monthlyBudgetCents", { min: 0, max: 1_000_000 }) ?? 2000,
+      monthlyBudgetCents: optionalNumber(payload.monthlyBudgetCents, "monthlyBudgetCents", { min: 0, max: 1_000_000 }) ?? 0,
       reportsTo: payload.reportsTo ?? null,
       skills: Array.isArray(payload.skills) ? payload.skills.slice(0, 12) : [],
       capabilities: Array.isArray(payload.capabilities) ? payload.capabilities.slice(0, 12) : ["chat"],
@@ -832,7 +867,8 @@ export function createService({ store, nim, engine, bus }) {
       spend: {
         totalCents: Math.round(company.ledger.reduce((sum, row) => sum + row.costCents, 0)),
         weekCents: Math.round(company.ledger.filter((row) => new Date(row.at).getTime() >= weekAgo).reduce((sum, row) => sum + row.costCents, 0)),
-        capCents: company.settings.monthlyBudgetCents,
+        capCents: company.settings.monthlyBudgetCents ?? 0,
+        unlimited: !((company.settings.monthlyBudgetCents ?? 0) > 0),
         topAgents: topAgentRows.map(({ agent, spend: cents }) => ({ id: agent.id, name: agent.name, cents })),
       },
       cycles: (company.cycleHistory ?? []).slice(0, 5),
@@ -920,7 +956,8 @@ export function createService({ store, nim, engine, bus }) {
     }
     return {
       totalCents: Math.round(company.ledger.reduce((sum, row) => sum + row.costCents, 0)),
-      capCents: company.settings.monthlyBudgetCents,
+      capCents: company.settings.monthlyBudgetCents ?? 0,
+      unlimited: !((company.settings.monthlyBudgetCents ?? 0) > 0),
       rows: company.ledger.slice(0, 200),
       byModel: [...byModel.values()].sort((a, b) => b.cents - a.cents),
       byAgent: [...byAgent.values()]
@@ -989,6 +1026,7 @@ export function createService({ store, nim, engine, bus }) {
 
   return {
     ensureSeed,
+    removeBudgetLimits,
     bootstrap,
     companyView,
     createCompany,

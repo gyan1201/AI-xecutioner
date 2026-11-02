@@ -22,7 +22,7 @@ export async function render(root, ctx) {
       <div class="stat">
         <div class="stat-value">${money(ledger.totalCents)}</div>
         <div class="stat-label">Month spend</div>
-        <div class="stat-sub">cap ${money(ledger.capCents)} · ${Math.round(capUsed * 100)}% used</div>
+        <div class="stat-sub">${ledger.unlimited ? "no spend limit" : `cap ${money(ledger.capCents)} · ${Math.round(capUsed * 100)}% used`}</div>
       </div>
       <div class="stat">
         <div class="stat-value">${num(ledger.rows.length)}</div>
@@ -36,8 +36,8 @@ export async function render(root, ctx) {
       </div>
       <div class="stat">
         <div class="stat-value">${ledger.agents.filter((agent) => agent.ratio > 0.8).length}</div>
-        <div class="stat-label">Agents near cap</div>
-        <div class="stat-sub">${ledger.agents.filter((agent) => agent.overBudget).length} over budget</div>
+        <div class="stat-label">${ledger.unlimited ? "Agents at cap" : "Agents near cap"}</div>
+        <div class="stat-sub">${ledger.unlimited ? "budgeting off" : `${ledger.agents.filter((agent) => agent.overBudget).length} over budget`}</div>
       </div>
     </div>
 
@@ -71,11 +71,11 @@ export async function render(root, ctx) {
                 <td>${avatar(company.agents.find((entry) => entry.id === agent.id) ?? { name: agent.name }, "sm")} <span style="margin-left:4px">${esc(agent.name)}</span></td>
                 <td>${modelPill(agent.model)}</td>
                 <td>
-                  <div class="progress"><i style="width:${Math.round(Math.min(1, agent.ratio) * 100)}%;background:${agent.overBudget ? "var(--red)" : agent.ratio > 0.8 ? "var(--amber)" : "var(--accent)"}"></i></div>
+                  ${agent.unlimited ? `<span class="hint">unlimited</span>` : `<div class="progress"><i style="width:${Math.round(Math.min(1, agent.ratio) * 100)}%;background:${agent.overBudget ? "var(--red)" : agent.ratio > 0.8 ? "var(--amber)" : "var(--accent)"}"></i></div>`}
                 </td>
                 <td class="nowrap">${money(agent.spentCents, { precise: true })}</td>
-                <td class="nowrap dim">${money(agent.capCents)}</td>
-                <td class="nowrap">${agent.overBudget ? `<span class="pill red">over</span>` : `<button class="btn sm ghost" data-edit-cap="${esc(agent.id)}">Edit cap</button>`}</td>
+                <td class="nowrap dim">${agent.unlimited ? "—" : money(agent.capCents)}</td>
+                <td class="nowrap">${agent.overBudget ? `<span class="pill red">over</span>` : `<button class="btn sm ghost" data-edit-cap="${esc(agent.id)}">Set cap</button>`}</td>
               </tr>`,
             )
             .join("") || `<tr><td class="hint">No agents.</td></tr>`}
@@ -110,7 +110,10 @@ export async function render(root, ctx) {
   root.querySelectorAll("[data-edit-cap]").forEach((button) =>
     button.addEventListener("click", async () => {
       const agent = company.agents.find((entry) => entry.id === button.dataset.editCap);
-      const next = window.prompt(`Monthly cap for ${agent.name} in cents`, String(agent.monthlyBudgetCents));
+      const next = window.prompt(
+        `Monthly cap for ${agent.name} in cents — 0 means no limit`,
+        String(agent.monthlyBudgetCents ?? 0),
+      );
       if (next == null) return;
       try {
         await api(`/api/companies/${ctx.companyId}/agents/${agent.id}`, { method: "PATCH", body: { monthlyBudgetCents: Number(next) } });

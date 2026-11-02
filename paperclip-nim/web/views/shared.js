@@ -24,6 +24,15 @@ export function agentChip(agent, { showTitle = true } = {}) {
 }
 
 export function spendBar(spend, { compact = false } = {}) {
+  if (spend?.unlimited) {
+    return `<div style="display:flex;flex-direction:column;gap:${compact ? "3px" : "5px"}">
+      <div class="progress"><i style="width:100%;background:var(--accent);opacity:.35"></i></div>
+      <div class="row" style="gap:6px;font-size:11px;color:var(--dim);justify-content:space-between">
+        <span>${money(spend?.spentCents ?? 0, { precise: true })} spent</span>
+        <span>no limit</span>
+      </div>
+    </div>`;
+  }
   const ratio = Math.min(1, spend?.ratio ?? 0);
   const over = (spend?.ratio ?? 0) >= 1;
   const color = over ? "var(--red)" : ratio > 0.8 ? "var(--amber)" : "var(--accent)";

@@ -494,7 +494,7 @@ export function planBlueprint(id, { issuePrefix = "NW" } = {}) {
       title: member.title,
       role: member.role,
       model: member.model,
-      monthlyBudgetCents: member.budget ?? 1500,
+      monthlyBudgetCents: 0, // unlimited by default; member.budget is kept as guidance only
       description: `${blueprint.name} team.`,
       capabilities: blueprint.functions,
       instructions: `You are part of the ${blueprint.name} delivery team. ${blueprint.summary} Work the board, cite evidence, and keep spend inside your cap.`,

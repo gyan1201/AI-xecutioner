@@ -118,19 +118,19 @@ Each blueprint ships a team (names, titles, roles, models, budgets), a goal with
 
 The Paperclip loop, intact, with NVIDIA as the only model provider:
 
-* **Dashboard** — company health, spend vs cap, the board at a glance, cycle history, recent runs.
+* **Dashboard** — company health, spend (caps are optional), the board at a glance, cycle history, recent runs.
 * **Inbox** — everything waiting on a human in one list: approvals, blocked issues, failed runs. Approve or deny inline.
 * **Issues** — list and board views, priority/assignee/project filters, full issue pages with an editable brief, acceptance criteria, comments, artifacts and a run trace.
 * **Run an issue** — `plan → guardrail in → retrieve + rerank knowledge → tools → deliverable → guardrail out → quality review → ledger`. Seven steps, streamed over SSE, with a verdict (`accepted` / `changes_requested`), a numeric score and review findings. A rejected deliverable goes back to `todo` and the next attempt is labelled `Review attempt: 2`.
-* **Cycle runner** — the strategist reads goals and the board, returns a plan with focus, assignments and risks, the top issues run inside budget, and a scribe writes the standup from the real results.
+* **Cycle runner** — the strategist reads goals and the board, returns a plan with focus, assignments and risks, the top issues run, and a scribe writes the standup from the real results.
 * **Agents** — roster tiles, hire modal (role, reporting line, model, remit, capabilities, budget, skills), per-agent profile with 14-day spend, assigned issues, run history, live chat with citations/tools/cost, skills, instructions and runtime knobs.
 * **Org chart** — the reporting tree plus roster economics.
 * **Goals / Projects / Routines** — metric targets, containers, and scheduled prompts you can run on demand.
-* **Spend** — 4 stat cards, a 14-day spend chart, spend by model, the per-agent budget table with inline caps, and the full ledger.
+* **Spend** — 4 stat cards, a 14-day spend chart, spend by model, the per-agent spend table with optional caps, and the full ledger.
 * **Activity** — kind-filtered audit trail with the raw event drawer.
 * **Knowledge** — documents embedded with a NIM embedding model, chunked and reranked before every agent context, plus a retrieval playground that shows embed and rerank scores side by side.
 
-Guardrails, budgets and approvals are enforced in the engine, not the UI: a run over cap is blocked with a reason, an output that fails the safety NIM is stopped, and an approval policy of `high` parks risky work in the inbox.
+Guardrails and approvals are enforced in the engine, not the UI: an output that fails the safety NIM is stopped, and an approval policy of `high` parks risky work in the inbox. **Spend is tracked but not capped by default** — every call still writes a ledger row, and a positive cap re-enables the gate (a run over cap is then blocked with a reason).
 
 ---
 
@@ -214,6 +214,14 @@ Full reference: [`docs/API.md`](docs/API.md). Endpoint-by-endpoint NIM notes: [`
 There is no account, no telemetry and no cloud dependency: `data/` is the whole database, and `GET /api/companies/:id/export` produces a portable bundle you can re-import.
 
 ---
+
+## Spend limits are opt-in
+
+Nothing stops an agent by default: `monthlyBudgetCents = 0` (the default for companies and agents) means **no limit**, and the UI says so ("no limit", "running without a spend limit") instead of drawing a progress bar to nowhere. Every model call is still metered — tokens, model, agent, run, cost — so the Spend page and the ledger are complete either way.
+
+Budgeting comes back the moment you want it: set a positive cap on a company (Settings → Monthly cap) or on an agent (Spend → Set cap, or the hire form). Then the engine gates exactly as before — an agent at its cap is `over_budget` and a run returns `blocked` with the reason.
+
+Companies created before this existed are migrated once at boot: caps move to 0 and the old numbers are kept in `settings.legacyMonthlyBudgetCents` / `agent.legacyMonthlyBudgetCents`, so nothing is lost.
 
 ## Front-end invariants
 

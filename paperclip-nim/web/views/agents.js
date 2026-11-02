@@ -79,7 +79,7 @@ function hireModal(ctx, models) {
       <div class="field"><label>Model</label><select class="select" name="model">${modelOptions}</select></div>
       <div class="field"><label>Remit</label><textarea class="textarea" name="description" placeholder="What this agent owns, and what good looks like."></textarea></div>
       <div class="field"><label>Instructions</label><textarea class="textarea" name="instructions" placeholder="How this agent should behave: format, constraints, evidence rules."></textarea></div>
-      <div class="field"><label>Monthly budget (cents)</label><input class="input" type="number" name="monthlyBudgetCents" value="200" min="0" step="50" /><div class="hint">$2.00/month. Agents stop running when they hit the cap.</div></div>
+      <div class="field"><label>Monthly budget (cents)</label><input class="input" type="number" name="monthlyBudgetCents" value="0" min="0" step="50" /><div class="hint">0 = no limit (default). A positive value pauses the agent when it hits the cap.</div></div>
       <div class="field"><label>Capabilities</label>
         <div class="chips" id="cap-chips">
           ${["chat", "tools", "vision", "embedding", "rerank", "image", "safety", "parse", "translate", "code"]

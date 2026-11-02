@@ -110,7 +110,7 @@ export async function render(root, ctx) {
           </div>
           <div class="field" style="margin-top:9px"><label>Mission</label><textarea class="textarea" id="mission" style="min-height:70px">${esc(company.mission)}</textarea></div>
           <div class="grid" style="grid-template-columns:1fr 1fr 1fr;margin-top:9px">
-            <div class="field"><label>Monthly cap (cents)</label><input class="input" type="number" id="monthly-cap" value="${company.settings.monthlyBudgetCents}" min="0" step="100" /></div>
+            <div class="field"><label>Monthly cap (cents)</label><input class="input" type="number" id="monthly-cap" value="${company.settings.monthlyBudgetCents ?? 0}" min="0" step="100" /><div class="hint">0 = no limit. Spend is still recorded either way.</div></div>
             <div class="field"><label>Cycle minutes</label><input class="input" type="number" id="cycle-minutes" value="${company.settings.cycleMinutes}" min="1" /></div>
             <div class="field"><label>Max cycles</label><input class="input" type="number" id="max-cycles" value="${company.settings.maxCycles}" min="1" /></div>
           </div>

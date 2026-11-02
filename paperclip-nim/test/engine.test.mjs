@@ -43,8 +43,11 @@ test("seed produces a staffed company with a board, goals and a ledger", () => {
   for (const agent of company.agents) {
     assert.ok(agent.model.includes("/"), `${agent.name} must run on a real NIM model id`);
     assert.ok(runtime.catalog.models.some((model) => model.id === agent.model), `${agent.model} is not in the catalog`);
-    assert.ok(agent.monthlyBudgetCents > 0, `${agent.name} needs a budget`);
+    // Budgeting is opt-in: a fresh company runs with no spend ceiling.
+    assert.equal(agent.monthlyBudgetCents ?? 0, 0, `${agent.name} should start unlimited`);
   }
+  assert.equal(company.settings.monthlyBudgetCents ?? 0, 0, "the company should start unlimited");
+  assert.equal(company.stats.budgetUnlimited, true);
 });
 
 test("runIssue executes the full loop and writes a trace, verdict, artifact and ledger row", async () => {
@@ -90,11 +93,26 @@ test("every run is reviewed and the attempt number is visible in the trace", asy
   }
 });
 
-test("budget gate blocks a run instead of overspending", async () => {
+test("an agent with no cap is never blocked by spend, however much it has spent", async () => {
   const company = runtime.store.getCompany(companyId);
   const agent = company.agents.find((entry) => company.issues.some((issue) => issue.assigneeId === entry.id && !["done", "cancelled"].includes(issue.status)));
   assert.ok(agent, "need an agent with open work");
   agent.monthlyBudgetCents = 0;
+  runtime.store.saveCompany(company);
+  const target = runtime.store
+    .getCompany(companyId)
+    .issues.find((issue) => issue.assigneeId === agent.id && !["done", "cancelled"].includes(issue.status));
+  const before = runtime.store.getCompany(companyId).ledger.length;
+  const result = await engine.runIssue({ companyId, issueId: target.id, actorId: "test" });
+  assert.notEqual(result.blocked, true, `unlimited agents must not be blocked: ${result.reason ?? ""}`);
+  assert.ok(runtime.store.getCompany(companyId).ledger.length > before, "the run should still be billed to the ledger");
+});
+
+test("a positive cap still gates a run — budgeting stays available", async () => {
+  const company = runtime.store.getCompany(companyId);
+  const agent = company.agents.find((entry) => company.issues.some((issue) => issue.assigneeId === entry.id && !["done", "cancelled"].includes(issue.status)));
+  assert.ok(agent, "need an agent with open work");
+  agent.monthlyBudgetCents = 1;
   runtime.store.saveCompany(company);
   const target = runtime.store
     .getCompany(companyId)
