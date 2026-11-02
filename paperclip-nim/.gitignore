@@ -1,0 +1,8 @@
+node_modules/
+data/companies/
+data/*.local.json
+data/keys.json
+data/providers.json
+data/settings.json
+*.log
+.DS_Store

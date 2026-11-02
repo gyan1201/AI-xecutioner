@@ -1,0 +1,274 @@
+# Paperclip × NVIDIA NIM
+
+A working clone of [Paperclip](https://github.com/paperclipai/paperclip) — the "company of AI agents" control room — rebuilt so that **every agent, skill, blueprint and model call runs on the NVIDIA NIM surface**: the models catalog, the 430-skill library, the 36 reference blueprints, and the raw inference endpoints behind them.
+
+Zero runtime dependencies. One Node process. Data on disk. Runs offline in a deterministic simulation, and switches to real `integrate.api.nvidia.com` inference the moment you add a key.
+
+```
+  ✂  Paperclip × NVIDIA NIM
+  ├─ listening   http://0.0.0.0:8790
+  ├─ mode        SIMULATION  (no key — deterministic simulator)
+  ├─ NIM base    https://integrate.api.nvidia.com/v1
+  ├─ models      97 in catalog (snapshot)
+  └─ data        ./data
+```
+
+![Dashboard](docs/screenshot-dashboard.jpg)
+
+Light by default, dark one click away — the toggle lives in the top bar and the
+choice persists. Every surface, border and status colour is a CSS token, so the
+two themes are the same 30 lines of variables rather than two stylesheets.
+
+| Light | Dark |
+| --- | --- |
+| ![Light](docs/screenshot-dashboard.jpg) | ![Dark](docs/screenshot-dark.jpg) |
+
+### One key, every model
+
+Paste a key from [build.nvidia.com/models](https://build.nvidia.com/models) and the whole catalog — all 97 models, every endpoint family — goes live. Or paste a **code snippet** instead of a key: Paperclip detects the provider (NVIDIA NIM, OpenAI, Groq, OpenRouter, Together, Mistral, DeepSeek, Fireworks, Perplexity, or any OpenAI-compatible host), extracts the key and base URL from it, adds the model and configures the connection.
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+  base_url="https://integrate.api.nvidia.com/v1",
+  api_key="nvapi-...",
+)
+```
+
+Paste that into **Settings → Quick Setup via Code Snippet** (or **Models → Add a key**) and press **Auto-Configure** — the panel shows what it detected before anything is written: provider, base URL, model, masked key and confidence. Snippets that read the key from `os.environ` are called out instead of silently failing.
+
+| | |
+| --- | --- |
+| ![Models](docs/screenshot-models.jpg) | ![Quick setup](docs/screenshot-quick-setup.jpg) |
+
+### Full auto: a name and a goal is the whole setup
+
+The first screen asks for two things — **what the company is called** and **what it is for** — and takes a model key if you have one. Press one button and Paperclip does the rest:
+
+1. **Configures every key you paste.** A raw key or a whole Python/cURL snippet, one per line; the provider is detected, verified when the network allows, and recorded. Skip it and the company still runs in simulation.
+2. **Picks the blueprint that fits the goal.** All 36 NVIDIA blueprints are ranked against the brief (curated domain intents + weighted lexical overlap), so “screen every online order for fraud” lands on Retail Loss Prevention rather than the nearest keyword coincidence. With a live key, the strategist model drafts the org instead and the draft is validated before it is used.
+3. **Hires the team.** Roles, titles and models come from the blueprint; template names are replaced with real ones, and every agent gets two NVIDIA skills that match the work.
+4. **Writes the backlog.** A metric-and-baseline issue, an issue per NIM endpoint family the company needs, the blueprint's build steps, and a review gate — each with acceptance criteria, so “done” is checkable.
+5. **Runs the first cycle.** The strategist plans, the team works, quality reviews, the ledger records every call, and the standup is written from the real results.
+6. **Hands you the company.** The report shows the steps, the first cycle's verdict and the spend, with one click into the dashboard. Optionally it is left in autonomous mode.
+
+`POST /api/launch` streams those steps over SSE (`?stream=1`), so the launcher is a live checklist rather than a spinner. Everything it creates is ordinary company state: edit the team, replan the backlog, run cycles by hand — nothing is hidden behind the generator.
+
+| | |
+| --- | --- |
+| ![Full auto](docs/screenshot-launch.jpg) | ![Launched](docs/screenshot-launch-report.jpg) |
+
+| | |
+| --- | --- |
+| ![Skills](docs/screenshot-skills.jpg) | ![Blueprints](docs/screenshot-blueprints.jpg) |
+| ![Models](docs/screenshot-models.jpg) | ![Studio](docs/screenshot-studio.jpg) |
+
+---
+
+## Quick start
+
+```bash
+cd paperclip-nim
+npm start            # http://localhost:8790
+```
+
+No install step, no build step, no dependencies — Node 20+ is enough.
+
+To run against the real NVIDIA API:
+
+```bash
+NVIDIA_API_KEY=nvapi-... npm start
+```
+
+…or paste the key — or a whole snippet — into **Settings → Quick Setup via Code Snippet**. It is verified against `GET /v1/models` when the host can reach it, stored in `data/keys.json` with mode `0600`, and never sent back to the browser.
+
+```bash
+npm test             # 62 tests: catalog, engine, providers, HTTP surface, shell invariants
+npm run sync:skills  # re-snapshot github.com/NVIDIA/skills (optional)
+```
+
+---
+
+## What "uses all NVIDIA NIM functions" means here
+
+The app is not a chat box with a NVIDIA badge. Every capability in the NIM API has a screen, a form, a ledger row and an agent that can call it.
+
+| NIM endpoint | What the clone does with it | Where you see it |
+| --- | --- | --- |
+| `POST /chat/completions` | agent runs, chat, planning, review, guardrails, translation, doc parsing | Agents, Issue detail, Studio, Cycle runner |
+| `POST /completions` | legacy text completion | Studio → Raw |
+| `POST /embeddings` | knowledge ingestion + retrieval, embedding playground | Knowledge, Studio → Embeddings |
+| `POST /ranking` | cross-encoder rerank in front of every context window | Knowledge, Studio → Rerank |
+| `POST /genai/{model}` | image artifacts attached to issues | Studio → Image, issue artifacts |
+| `POST /biology/{task}` | BioNeMo protein / molecule / genomics tasks | Studio → Biology |
+| `GET /models` | catalog, live merge, credential verification, per-model probe | Models, Settings |
+| `ANY /v1/{path}` | raw passthrough with typed errors and hints | Studio → Raw |
+
+### Models — 97 in the catalog
+
+The snapshot is built from the real `GET /v1/models` payload plus curated metadata (context window, price per 1M tokens, capabilities, notes), so the UI can filter and route on capability rather than guess from a name:
+
+* current generation — `nvidia/nemotron-3-ultra-550b-a55b`, `nemotron-3-super-120b-a12b`, `nemotron-3-nano-omni-30b-a3b-reasoning`, `nemotron-3.5-lightning-30b-a3b`, `nemotron-3.5-super-vl-120b-a12b`, `nemotron-3.5-embed-8b`, `nemotron-parse-2.0`, `cosmos-reason2-8b`, `riva-translate-4b-instruct-v2`
+* NeMo Retriever — `llama-3.2-nv-embedqa-1b-v1`, `nv-embedqa-mistral-7b-v2`, `nv-rerankqa-mistral-4b-v3`, `llama-3.2-nv-rerankqa-1b-v2`, `nvclip`
+* NeMo Guardrails — `nemoguard-8b-content-safety`, `-topic-control`, `nemotron-safety-guard-8b-v3`, `llama-guard-4-12b`
+* BioNeMo — `bionemo-boltz2`, `evo2-40b`, `esmfold`, `proteinmpnn`, `rfdiffusion`, `diffdock`, `genmol`, `megamolbart`
+* multi-vendor — `mistral-large-4-1t-a52b`, `deepseek-v4.1-flash`, `kimi-k2.6`, `minimax-m3.1-flash`, `gemma-4-31b`, `glm-5.3-flash`, `gpt-oss-20b`, `palmyra-*`, `codestral`, and the legacy tail
+
+**Models → Sync live catalog** merges whatever `GET /v1/models` returns for your account: known IDs get `verified` badges, unknown IDs are appended with inferred capabilities so a freshly released NIM shows up without a code change. **Probe** sends one real call and reports latency and a sample.
+
+### Skills — all 430
+
+`data/skills.json` is a snapshot of [github.com/NVIDIA/skills](https://github.com/NVIDIA/skills): 430 `SKILL.md` bundles across 15 categories (Accelerated Computing, Agentic AI & NIM, Biology & Drug Discovery, Data & RAPIDS, …).
+
+A skill is not a badge in this app. Assigning one appends its scope and instructions to the agent's system prompt, and the run trace records which skills were in play — so *"which instructions produced this answer"* is answerable. `GET /api/skills/suggest?q=…` scores the catalog against an issue and proposes the three skills worth attaching.
+
+### Blueprints — all 36 reference architectures
+
+From `build.nvidia.com/blueprints`: AI-Q research assistant, DocsFab, RAG with NeMo Retriever, Deep Agents on Nemotron 3 Ultra, GQE GPU SQL, molecular design with BioNeMo, AI-factory SRE root-cause, self-improving Hermes agents, trading-strategy discovery, and the rest.
+
+Each blueprint ships a team (names, titles, roles, models, budgets), a goal with a real metric, a backlog with acceptance criteria, and a pipeline trace of the NIM functions it needs. **Deploy** turns it into a staffed company with a goal, a board and — optionally — an immediate first cycle.
+
+The five healthcare and biology blueprints — ambient clinical scribe, medical imaging, genomics, drug discovery, protein structure — are written out in full: real clinician names and titles, a domain goal with a unit and a baseline (12 → 4 minutes per encounter), and a five-issue backlog that names the actual work (ASR transcripts, SOAP notes with transcript citations, PHI redaction, DICOM preflight, interval-change flags, pLDDT thresholds). Deploying `ambient-clinical` onto a company whose mission is the documentation goal produces Dr. Amara Osei and two engineers, not a Blueprint Lead placeholder. Goals also carry a direction, so a metric that improves downward is scored correctly instead of showing 300%.
+
+| Healthcare AI — the documentation metric | The two clinical pods |
+| --- | --- |
+| ![Healthcare dashboard](docs/screenshot-healthcare-dashboard.jpg) | ![Clinical org chart](docs/screenshot-healthcare-team.jpg) |
+
+---
+
+## The product
+
+The Paperclip loop, intact, with NVIDIA as the only model provider:
+
+* **Full auto launch** — name + goal + optional keys → a blueprint-matched team, a written backlog, a configured provider and a first cycle, streamed step by step.
+* **Dashboard** — company health, spend (caps are optional), the board at a glance, cycle history, recent runs.
+* **Inbox** — everything waiting on a human in one list: approvals, blocked issues, failed runs. Approve or deny inline.
+* **Issues** — list and board views, priority/assignee/project filters, full issue pages with an editable brief, acceptance criteria, comments, artifacts and a run trace.
+* **Run an issue** — `plan → guardrail in → retrieve + rerank knowledge → tools → deliverable → guardrail out → quality review → ledger`. Seven steps, streamed over SSE, with a verdict (`accepted` / `changes_requested`), a numeric score and review findings. A rejected deliverable goes back to `todo` and the next attempt is labelled `Review attempt: 2`.
+* **Cycle runner** — the strategist reads goals and the board, returns a plan with focus, assignments and risks, the top issues run, and a scribe writes the standup from the real results.
+* **Agents** — roster tiles, hire modal (role, reporting line, model, remit, capabilities, budget, skills), per-agent profile with 14-day spend, assigned issues, run history, live chat with citations/tools/cost, skills, instructions and runtime knobs.
+* **Org chart** — the reporting tree plus roster economics.
+* **Goals / Projects / Routines** — metric targets, containers, and scheduled prompts you can run on demand.
+* **Spend** — 4 stat cards, a 14-day spend chart, spend by model, the per-agent spend table with optional caps, and the full ledger. Each row records whether the call was **simulated**, so a demo never looks like billed inference.
+* **Activity** — kind-filtered audit trail with the raw event drawer.
+* **Knowledge** — documents embedded with a NIM embedding model, chunked and reranked before every agent context, plus a retrieval playground that shows embed and rerank scores side by side.
+
+Guardrails and approvals are enforced in the engine, not the UI: an output that fails the safety NIM is stopped, and an approval policy of `high` parks risky work in the inbox. **Spend is tracked but not capped by default** — every call still writes a ledger row, and a positive cap re-enables the gate (a run over cap is then blocked with a reason).
+
+---
+
+## Architecture
+
+```
+server/
+  index.mjs            HTTP server, static files, graceful shutdown
+  routes.mjs           one flat route table; SSE where it matters; error mapping
+  runtime.mjs          composition root: store + NIM client + engine + service
+  config.mjs           env, data paths, key vault, settings
+  store.mjs            JSON documents + NDJSON append, event bus, subscriptions
+  domain/
+    model.mjs          entity factories, cost/ledger, spend gates, recompute
+    seed.mjs           the demo company: 8 agents, 16 issues, goals, knowledge
+    retrieval.mjs      chunk → embed → cosine → rerank → prompt context
+    tools.mjs          agent tools (knowledge search, issue lookup, ledger, web)
+    engine.mjs         plan / runIssue / chat / cycle / routines / approvals
+    launch.mjs         goal → blueprint match → team + backlog (full auto)
+    service.mjs        view models the UI consumes
+  nim/
+    catalog.mjs        97-model catalog, capabilities, costs, live merge
+    client.mjs         one adapter per endpoint family + raw passthrough
+    sim.mjs            deterministic simulator (hash-seeded, no network)
+    skills.mjs         430-skill catalog + search + suggestions
+    blueprints.mjs     36 blueprints → deployable plans
+    usage.mjs          AsyncLocalStorage usage context → ledger rows
+    intake.mjs         credential parsing (paste a key, env line or curl snippet)
+web/
+  index.html  styles.css  lib.js (DOM/SSE/format helpers)  app.js (shell, router, palette)
+  views/      20 view modules, each `render(root, ctx)` → optional cleanup
+data/         companies/*.json, skills.json, settings.json, keys.json(0600)
+test/         catalog · engine · api
+```
+
+**Simulation is a first-class mode.** With no key, `nim/sim.mjs` answers every endpoint deterministically from the prompt (hash-seeded), so screenshots, tests and demos are reproducible — and every response is labelled `simulated: true` in the UI, the trace and the ledger. Adding a key flips the same code path to real inference; no view changes.
+
+---
+
+## API
+
+Every screen is a thin client over a JSON API. Highlights:
+
+```
+GET    /api/health | /api/status | /api/bootstrap
+GET    /api/companies                     POST /api/companies
+POST   /api/launch[?stream=1]              POST /api/launch/plan   (dry run)
+GET    /api/companies/:id/dashboard|inbox|ledger|org|export
+POST   /api/companies/:id/cycle[?stream=1]      POST …/plan
+GET    /api/companies/:id/agents          POST/PATCH/DELETE
+POST   /api/companies/:id/agents/:agentId/chat  (SSE)
+PUT    /api/companies/:id/agents/:agentId/skills
+GET    /api/companies/:id/issues          POST/PATCH/DELETE
+POST   /api/companies/:id/issues/:issueId/run[?stream=1]  (SSE)
+POST   /api/companies/:id/issues/:issueId/comments
+POST   /api/companies/:id/approvals/:approvalId/decide
+GET/POST/PATCH  /api/companies/:id/{goals,projects,routines,knowledge}
+POST   /api/companies/:id/knowledge/search
+POST   /api/companies/:id/blueprints/:blueprintId        (deploy)
+GET    /api/skills | /api/skills/meta | /api/skills/:id | /api/skills/suggest
+GET    /api/blueprints | /api/blueprints/:id
+GET    /api/models        POST /api/models/refresh | /api/models/probe
+POST   /api/studio/{chat,embed,rerank,image,parse,translate,safety,biology,raw}
+GET/PATCH /api/settings   GET/POST/PATCH/DELETE /api/keys   POST /api/keys/verify
+POST   /api/data/reset | /api/data/prune      GET /api/events (SSE)
+```
+
+Full reference: [`docs/API.md`](docs/API.md). Endpoint-by-endpoint NIM notes: [`docs/NIM.md`](docs/NIM.md). Design notes and invariants: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+---
+
+## Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `NVIDIA_API_KEY` | — | key from build.nvidia.com; absent ⇒ simulation |
+| `NIM_BASE_URL` | `https://integrate.api.nvidia.com/v1` | any OpenAI-compatible NIM gateway, including self-hosted |
+| `PORT` | `8790` | HTTP port (always binds `0.0.0.0`) |
+| `FORCE_SIMULATION` | — | keep simulation even with a key (demos, tests) |
+| `NIM_DEFAULT_*` | see `.env.example` | override routing defaults (`CHAT`, `REASONING`, `FAST`, `VISION`, `CODE`, `EMBED`, `RERANK`, `IMAGE`, `SAFETY`, `PARSE`, `TRANSLATE`, `REWARD`) |
+| `PAPERCLIP_DATA_DIR` | `./data` | keep state somewhere else (used by the tests) |
+
+There is no account, no telemetry and no cloud dependency: `data/` is the whole database, and `GET /api/companies/:id/export` produces a portable bundle you can re-import.
+
+---
+
+## Spend limits are opt-in
+
+Nothing stops an agent by default: `monthlyBudgetCents = 0` (the default for companies and agents) means **no limit**, and the UI says so ("no limit", "running without a spend limit") instead of drawing a progress bar to nowhere. Every model call is still metered — tokens, model, agent, run, cost — so the Spend page and the ledger are complete either way.
+
+Budgeting comes back the moment you want it: set a positive cap on a company (Settings → Monthly cap) or on an agent (Spend → Set cap, or the hire form). Then the engine gates exactly as before — an agent at its cap is `over_budget` and a run returns `blocked` with the reason.
+
+Companies created before this existed are migrated once at boot: caps move to 0 and the old numbers are kept in `settings.legacyMonthlyBudgetCents` / `agent.legacyMonthlyBudgetCents`, so nothing is lost.
+
+## Front-end invariants
+
+Two rules keep the shell from ever painting an empty page, and `test/ui.test.mjs` enforces both:
+
+* **`[hidden]` must beat author CSS.** `styles.css` declares `[hidden] { display: none !important; }`. The palette, modal and drawer roots all set `display: flex/grid`, which otherwise overrides the user-agent `[hidden]` rule and stacks three dark scrims over the app on first paint — the app looks blank while the JS and API are perfectly healthy.
+* **Colour lives in tokens.** Components never hardcode a surface or a status hue — `--panel`, `--text`, `--scrim`, `--chart-N` and friends are defined once for `:root` (dark) and once for `[data-theme="light"]`. A test fails the build on a literal `color: #…` in a component rule, because that is how a theme ends up with an invisible label.
+* **The theme is set before the stylesheet.** A tiny inline script in `index.html` reads `localStorage.paperclip-theme` and sets `data-theme` on `<html>`, so the first paint is already correct (no white flash).
+* **Overlays toggle via the `hidden` property**, never a class, so the rule above always applies.
+
+* **Assets are content-addressed.** The HTML links `/styles.css?v=<hash>` and `/app.js?v=<hash>`, the server stamps the same hash onto every module specifier it serves, and the HTML itself is `no-store`. `Cache-Control: no-cache` alone is only a *request* to revalidate; a proxy or browser that ignores it will happily serve last week's stylesheet, which is how a fixed bug keeps looking broken. Change a file, change the URL — no cache can hold it back.
+
+`index.html` also carries a static boot shell (the ✂ mark, `#boot-status`, `<noscript>`) plus a classic-script `window.__pcFail` fallback on `error` / `unhandledrejection` / an 8s watchdog, and `app.js` sets `window.__pcBooted = true` after the first render. If the module graph ever fails, you get a readable message instead of a blank screen.
+
+---
+
+## Notes and limits
+
+* **Simulation is not inference.** It is deterministic, structured and honest about being simulated — useful for exploring the product and for tests, but it will not surprise you with a better answer.
+* **Live mode requires egress** to your NIM base URL. If the sandbox cannot reach `integrate.api.nvidia.com`, the app detects it (`/api/models` refresh fails fast), stays on the snapshot and keeps working.
+* **Model metadata drifts.** Prices and context windows are curated; `mergeLive` keeps IDs and capabilities honest, but treat `$/1M` as an estimate.
+* **The catalog is a snapshot, not a proxy.** It was built from the real `/v1/models` response; re-run **Sync live catalog** whenever NVIDIA ships something new.
+
+Built to mirror Paperclip's product surface (issues, agents, cycles, approvals, budgets, activity) with NVIDIA NIM as the substrate. Paperclip is MIT licensed; this is an independent clone for the NIM ecosystem.
