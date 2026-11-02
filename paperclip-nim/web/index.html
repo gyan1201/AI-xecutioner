@@ -6,7 +6,22 @@
     <title>Paperclip × NVIDIA NIM</title>
     <meta name="description" content="A Paperclip clone where every agent, skill, blueprint and endpoint runs on NVIDIA NIM." />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=__ASSET_VERSION__" />
+    <!--
+      Critical rules, inlined on purpose: they must apply before (or without) the
+      stylesheet, because an overlay that paints on top of the app at boot looks
+      exactly like a blank page. `hidden` wins over the `display: flex/grid` on
+      .palette/.modal-root/.drawer-root; the boot shell below stays readable even
+      if the module graph never executes.
+    -->
+    <style>
+      [hidden] { display: none !important; }
+      html, body { margin: 0; background: #060607; color: #f2f2f4; }
+      #boot { display: grid; place-items: center; min-height: 100vh; font: 13px/1.6 ui-sans-serif, system-ui, sans-serif; text-align: center; padding: 24px; }
+      #boot .boot-mark { font-size: 26px; letter-spacing: .18em; color: #76b900; font-weight: 600; }
+      #boot-status { margin-top: 10px; color: #8b8b93; max-width: 54ch; }
+      #boot-status.error { color: #ff8f8f; white-space: pre-wrap; text-align: left; }
+    </style>
   </head>
   <body>
     <div class="app" id="app">
@@ -100,6 +115,6 @@
         }
       }, 8000);
     </script>
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="/app.js?v=__ASSET_VERSION__"></script>
   </body>
 </html>

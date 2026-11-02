@@ -387,6 +387,19 @@ test("static UI is served and unknown API routes return JSON 404", async () => {
     assert.equal(response.status, 200, `${asset} should be served`);
   }
 
+  // Assets are content-addressed: a stale cache must not be able to survive a deploy.
+  assert.doesNotMatch(html, /__ASSET_VERSION__/, "the version placeholder must be substituted");
+  const version = html.match(/styles\.css\?v=([a-f0-9]{6,})/)?.[1];
+  assert.ok(version, "the stylesheet must be linked with a content hash");
+  assert.match(html, new RegExp(`app\\.js\\?v=${version}`), "the entry module must carry the same hash");
+  assert.match(html, /\[hidden\]\s*\{\s*display:\s*none\s*!important/, "critical CSS must be inlined in the document");
+  assert.match(index.headers.get("cache-control") ?? "", /no-store/, "the unversioned HTML must not be cached");
+
+  const entry = await fetch(`${base}/app.js?v=${version}`);
+  const entrySource = await entry.text();
+  assert.match(entrySource, /views\/dashboard\.js\?v=[a-f0-9]{6,}/, "module specifiers must be versioned too");
+  assert.ok(entry.headers.get("etag"), "versioned assets should be revalidatable");
+
   const missing = await get("/api/definitely-not-a-route");
   assert.equal(missing.status, 404);
   assert.ok(missing.body.error);

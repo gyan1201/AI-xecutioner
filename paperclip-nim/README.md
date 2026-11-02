@@ -195,6 +195,8 @@ Two rules keep the shell from ever painting an empty page, and `test/ui.test.mjs
 * **`[hidden]` must beat author CSS.** `styles.css` declares `[hidden] { display: none !important; }`. The palette, modal and drawer roots all set `display: flex/grid`, which otherwise overrides the user-agent `[hidden]` rule and stacks three dark scrims over the app on first paint — the app looks blank while the JS and API are perfectly healthy.
 * **Overlays toggle via the `hidden` property**, never a class, so the rule above always applies.
 
+* **Assets are content-addressed.** The HTML links `/styles.css?v=<hash>` and `/app.js?v=<hash>`, the server stamps the same hash onto every module specifier it serves, and the HTML itself is `no-store`. `Cache-Control: no-cache` alone is only a *request* to revalidate; a proxy or browser that ignores it will happily serve last week's stylesheet, which is how a fixed bug keeps looking broken. Change a file, change the URL — no cache can hold it back.
+
 `index.html` also carries a static boot shell (the ✂ mark, `#boot-status`, `<noscript>`) plus a classic-script `window.__pcFail` fallback on `error` / `unhandledrejection` / an 8s watchdog, and `app.js` sets `window.__pcBooted = true` after the first render. If the module graph ever fails, you get a readable message instead of a blank screen.
 
 ---

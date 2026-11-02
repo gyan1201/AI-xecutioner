@@ -5,7 +5,8 @@
  * with `:params`; anything not starting with /api is the single-page app.
  */
 
-import { createReadStream, existsSync, statSync, readdirSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { createReadStream, existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { extname, join, normalize, resolve } from "node:path";
 import { ensureDirs, paths, publicConfig, resolveCredential, saveSettings, loadSettings, vaultView, addVaultKey, setActiveVaultKey, removeVaultKey } from "./config.mjs";
 import { CAPABILITIES, MODEL_CATALOG, catalogSummary, findModel, searchModels } from "./nim/catalog.mjs";
@@ -744,6 +745,52 @@ export function createApp(runtime) {
 
   /* ---- static ---- */
 
+  /**
+   * Content address for the front end.
+   *
+   * `Cache-Control: no-cache` is a *request to revalidate*, and a proxy or a
+   * browser that ignores it will happily serve yesterday's stylesheet forever —
+   * which is exactly how a CSS bug survives a deploy and looks like a blank
+   * page. So the HTML never links `/styles.css`: it links
+   * `/styles.css?v=<hash of the files>`. Change a file, change the URL, and no
+   * cache anywhere can hand you the old one.
+   */
+  const assetStamp = { version: "", at: 0 };
+
+  function assetVersion() {
+    const webRoot = resolve(paths.web);
+    const newest = newestMtime(webRoot);
+    if (assetStamp.version && newest <= assetStamp.at) return assetStamp.version;
+    const hash = createHash("sha256");
+    for (const relative of ["index.html", "styles.css", "app.js", "lib.js"]) {
+      const file = join(webRoot, relative);
+      if (existsSync(file)) hash.update(readFileSync(file));
+    }
+    assetStamp.version = hash.digest("hex").slice(0, 10);
+    assetStamp.at = Date.now();
+    return assetStamp.version;
+  }
+
+  function newestMtime(directory) {
+    let newest = 0;
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const full = join(directory, entry.name);
+      if (entry.isDirectory()) newest = Math.max(newest, newestMtime(full));
+      else newest = Math.max(newest, statSync(full).mtimeMs);
+    }
+    return newest;
+  }
+
+  // Module specifiers served to the browser carry the same stamp, so editing a
+  // view cannot leave a cached `./views/foo.js` behind a fresh `app.js`.
+  const IMPORT_SPECIFIER = /(\bfrom\s*|\bimport\s*\(\s*)(["'])(\.{1,2}\/[^"']+?\.js)\2/g;
+
+  function stamped(source, version) {
+    return source
+      .replace(IMPORT_SPECIFIER, (_match, lead, quote, specifier) => `${lead}${quote}${specifier}?v=${version}${quote}`)
+      .replaceAll("__ASSET_VERSION__", version);
+  }
+
   function serveStatic(req, res, pathname) {
     const webRoot = resolve(paths.web);
     let target = pathname === "/" ? "/index.html" : pathname;
@@ -761,15 +808,32 @@ export function createApp(runtime) {
       }
     }
     const ext = extname(file).toLowerCase();
-    const size = statSync(file).size;
+    const version = assetVersion();
     const headers = {
       "Content-Type": MIME[ext] ?? "application/octet-stream",
-      // Explicit length: chunked responses are the first thing a proxy lets you down on.
-      "Content-Length": String(size),
-      // HTML/JS/CSS revalidate on every load: a stale module graph looks exactly
-      // like a blank page, and this app changes often.
-      "Cache-Control": [".html", ".js", ".css", ".svg"].includes(ext) ? "no-cache" : "public, max-age=600",
+      // Versioned URLs are immutable; anything else must not be trusted.
+      // The HTML is the only unversioned entry point: it must never be stored,
+      // or a cached copy would keep pointing at the previous asset URLs.
+      "Cache-Control": ext === ".html" ? "no-store, must-revalidate" : [".js", ".css", ".svg"].includes(ext) ? "no-cache, must-revalidate" : "public, max-age=600",
+      ETag: `"${version}-${ext.slice(1)}"`,
     };
+
+    if (ext === ".html" || ext === ".js") {
+      // Tiny files, and they must be rewritten (version stamp) before they leave.
+      const body = Buffer.from(stamped(readFileSync(file, "utf8"), version), "utf8");
+      headers["Content-Length"] = String(body.length);
+      res.writeHead(200, headers);
+      if (req.method === "HEAD") {
+        res.end();
+        return;
+      }
+      res.end(body);
+      return;
+    }
+
+    const size = statSync(file).size;
+    // Explicit length: chunked responses are the first thing a proxy lets you down on.
+    headers["Content-Length"] = String(size);
     res.writeHead(200, headers);
     if (req.method === "HEAD") {
       res.end();
