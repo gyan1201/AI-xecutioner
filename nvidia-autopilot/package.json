@@ -1,0 +1,17 @@
+{
+  "name": "nvidia-autopilot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "NVIDIA NIM control room: every NIM function, plus a goal-driven autonomous company autopilot.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/index.mjs",
+    "dev": "node --watch server/index.mjs",
+    "seed": "node scripts/seed-demo.mjs",
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check server/index.mjs"
+  }
+}

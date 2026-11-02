@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>NVIDIA Autopilot — give a goal, get an operating company</title>
+    <meta
+      name="description"
+      content="Every NVIDIA NIM capability in one control room, plus an autopilot that turns one company goal into planned, reviewed, shipped work."
+    />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="rail" id="rail">
+        <a class="brand" href="#/">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" width="26" height="26" fill="none">
+              <path d="M4 22c7 0 9-12 16-12 4 0 6 3 6 6 0 4-3 6-7 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+              <circle cx="26" cy="10" r="2.2" fill="currentColor"/>
+            </svg>
+          </span>
+          <span class="brand-text"><strong>NVIDIA</strong><span>Autopilot</span></span>
+        </a>
+        <nav class="nav" id="nav" aria-label="Primary"></nav>
+        <div class="rail-foot">
+          <div class="mode-chip" id="mode-chip" title="Inference mode">
+            <span class="dot"></span><span id="mode-label">checking…</span>
+          </div>
+          <div class="rail-meta">build.nvidia.com · NIM</div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <button class="icon-btn only-mobile" id="menu-btn" aria-label="Open navigation">☰</button>
+          <div class="crumb" id="crumb">Mission control</div>
+          <div class="topbar-actions">
+            <span class="pill" id="model-pill" title="Models discovered from build.nvidia.com">— models</span>
+            <a class="btn btn-ghost" href="#/settings" id="key-btn">Connect NVIDIA key</a>
+          </div>
+        </header>
+        <div class="view" id="view" tabindex="-1"></div>
+        <footer class="foot">
+          <span>Self-hosted control plane for NVIDIA NIM. Keys stay on this machine.</span>
+          <span class="mono" id="node-meta"></span>
+        </footer>
+      </main>
+    </div>
+
+    <div class="toasts" id="toasts" aria-live="polite"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
